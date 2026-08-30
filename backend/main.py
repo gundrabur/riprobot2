@@ -8,7 +8,7 @@ import subprocess
 # time: Used for introducing delays (e.g., wait for CD to settle)
 import time
 
-# os: File system operations (checking paths, creating directories)
+# os: File system operations (checking paths, creating directories, renaming files)
 import os
 
 # datetime: Generate timestamps for organizing ripped files
@@ -53,10 +53,11 @@ def start_ripping(device_path: str):
     Main ripping function. Handles the complete workflow of:
     1. Waiting for the CD to settle in the drive
     2. Verifying USB storage is available
-    3. Retrieving album metadata from MusicBrainz
+    3. Retrieving album metadata and tracklist from MusicBrainz
     4. Creating organized output directory
     5. Executing cdparanoia to extract audio tracks
-    6. Ejecting the CD after completion
+    6. Renaming extracted WAV files to actual track titles
+    7. Ejecting the CD after completion
     """
     # Initial delay to allow CD to stabilize and be fully recognized by the system
     print(f"Audio-CD in Laufwerk {device_path} erkannt! Warte 5 Sekunden...")
@@ -74,21 +75,32 @@ def start_ripping(device_path: str):
                 active_rips.remove(device_path)
         return
         
-    # Retrieve album metadata from MusicBrainz using the CD's unique disc ID
-    # This allows organizing ripped files with proper artist and album names instead of generic folders
+    # Retrieve album metadata and tracklist from MusicBrainz using the CD's unique disc ID
+    # Requesting "recordings" includes individual track titles for renaming WAV files
     print("Lese Disc-ID und suche auf MusicBrainz...")
     artist, album = None, None
+    track_titles = []
+    
     try:
         # Read the unique identifier of the CD from the physical disc
         disc = discid.read(device_path)
-        # Query MusicBrainz database for this disc ID, requesting artist information
-        result = musicbrainzngs.get_releases_by_discid(disc.id, includes=["artists"])
-        # Extract artist and album information from the first matching release
+        # Query MusicBrainz database for this disc ID, requesting artist and tracklist information
+        result = musicbrainzngs.get_releases_by_discid(disc.id, includes=["artists", "recordings"])
+        # Extract artist, album, and track titles from the first matching release
         if "disc" in result and result["disc"].get("release-list"):
             release = result["disc"]["release-list"][0]
             artist = release.get("artist-credit-phrase", "Unknown Artist")
             album = release.get("title", "Unknown Album")
-            print(f"Erkannt: {artist} - {album}")
+            
+            # Extract individual track titles from the release's tracklist
+            if "medium-list" in release and len(release["medium-list"]) > 0:
+                medium = release["medium-list"][0]
+                if "track-list" in medium:
+                    for track in medium["track-list"]:
+                        title = track.get("title") or track.get("recording", {}).get("title", "Unbekannter Track")
+                        track_titles.append(title)
+                        
+            print(f"Erkannt: {artist} - {album} ({len(track_titles)} Tracks gefunden)")
     # Gracefully handle any errors during metadata retrieval (network issues, unrecognized disc, etc.)
     except Exception as e:
         print(f"Keine Metadaten gefunden ({e}). Nutze Fallback-Namen.")
@@ -128,7 +140,28 @@ def start_ripping(device_path: str):
         
         # Check if cdparanoia completed successfully (return code 0 indicates success)
         if result.returncode == 0:
-            print("Ripping erfolgreich abgeschlossen!")
+            print("Ripping erfolgreich abgeschlossen! Benenne Tracks um...")
+            
+            # If track titles were retrieved from MusicBrainz, rename generic WAV files
+            if track_titles:
+                for filename in sorted(os.listdir(rip_dir)):
+                    if filename.endswith(".wav"):
+                        # Extract track number from default cdparanoia filenames (e.g., track01.cdda.wav)
+                        match = re.search(r'track(\d+)', filename, re.IGNORECASE)
+                        if match:
+                            track_num = int(match.group(1))
+                            # Ensure the track number matches an entry in our retrieved track list
+                            if 1 <= track_num <= len(track_titles):
+                                clean_title = clean_filename(track_titles[track_num - 1])
+                                new_filename = f"{track_num:02d} - {clean_title}.wav"
+                                
+                                old_path = os.path.join(rip_dir, filename)
+                                new_path = os.path.join(rip_dir, new_filename)
+                                
+                                # Rename file to include track number and sanitized title
+                                os.rename(old_path, new_path)
+                                print(f"Umbenannt: {filename} -> {new_filename}")
+            print("Alle Dateien wurden erfolgreich verarbeitet!")
         else:
             # Log error details from cdparanoia if the operation failed
             print("Fehler beim Rippen:", result.stderr)
