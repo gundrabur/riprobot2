@@ -2,3 +2,5 @@ fastapi
 uvicorn
 pyudev
 apprise
+discid
+musicbrainzngs
