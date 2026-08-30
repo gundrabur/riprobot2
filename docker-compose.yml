@@ -9,8 +9,8 @@ services:
     ports:
       - "8000:8000"              # Port für das FastAPI Web-Interface
     volumes:
-      - ./backend:/app              # Live-Code-Sync für die Entwicklung
-      - /media/usb:/output:rshared  # rshared erlaubt Hot-Plugging im laufenden Container
+      - ./backend:/app
+      - /media:/media:rshared
     environment:
       - TZ=Europe/Berlin
       - PYTHONUNBUFFERED=1

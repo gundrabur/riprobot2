@@ -15,14 +15,24 @@ def start_ripping(device_path: str):
     print(f"Audio-CD in Laufwerk {device_path} erkannt! Warte 5 Sekunden...")
     time.sleep(5)
     
+    # Sicherheits-Check: Ist der USB-Stick wirklich eingehängt?
+    if not os.path.exists("/media/usb"):
+        print("FEHLER: Kein USB-Stick unter /media/usb gefunden! Breche ab.")
+        subprocess.run(["eject", device_path])
+        with lock:
+            if device_path in active_rips:
+                active_rips.remove(device_path)
+        return
+    
+    # Zielordner auf dem USB-Stick
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    rip_dir = f"/output/rip_{timestamp}"
+    rip_dir = f"/media/usb/rip_{timestamp}"
     os.makedirs(rip_dir, exist_ok=True)
     
     print(f"Starte Ripping-Prozess von {device_path} in {rip_dir}...")
     
     try:
-        # Ripping durchführen
+        # CD Rippen (WAV)
         result = subprocess.run(
             ["cdparanoia", "-d", device_path, "-B"],
             cwd=rip_dir,
@@ -39,15 +49,14 @@ def start_ripping(device_path: str):
         subprocess.run(["eject", device_path])
         
     finally:
-        # GANZ WICHTIG: Das Laufwerk am Ende wieder "entsperren", auch bei Fehlern
         with lock:
             if device_path in active_rips:
                 active_rips.remove(device_path)
-        print(f"Laufwerk {device_path} ist wieder bereit für die nächste CD.")
+        print(f"Laufwerk {device_path} ist wieder bereit.")
 
 @app.get("/")
 def read_root():
-    return {"status": "RipRobot2 läuft mit intelligenter udev-Sperre!"}
+    return {"status": "RipRobot2 läuft mit intelligenter udev-Sperre und USB-Support!"}
 
 @app.post("/trigger-rip")
 def trigger_rip(background_tasks: BackgroundTasks, device: str = "sr0"):
