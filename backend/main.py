@@ -2,13 +2,13 @@
 # BackgroundTasks allows running long-running tasks without blocking the HTTP response
 from fastapi import FastAPI, BackgroundTasks
 
-# subprocess: Execute system commands like cdparanoia and eject
+# subprocess: Execute system commands like cdparanoia, flac, and eject
 import subprocess
 
 # time: Used for introducing delays (e.g., wait for CD to settle)
 import time
 
-# os: File system operations (checking paths, creating directories, renaming files)
+# os: File system operations (checking paths, creating directories, renaming/deleting files)
 import os
 
 # datetime: Generate timestamps for organizing ripped files
@@ -59,7 +59,7 @@ def start_ripping(device_path: str):
     3. Retrieving album metadata and tracklist from MusicBrainz
     4. Creating organized output directory
     5. Executing cdparanoia to extract audio tracks (with global timeout)
-    6. Renaming extracted WAV files to actual track titles
+    6. Converting WAV to FLAC and embedding metadata tags
     7. Ejecting the CD after completion or failure
     """
     # Initial delay to allow CD to stabilize and be fully recognized by the system
@@ -67,19 +67,15 @@ def start_ripping(device_path: str):
     time.sleep(5)
     
     # Verify that USB storage destination is available and mounted
-    # This ensures the ripped audio will have a valid output location
     if not os.path.exists("/media/usb"):
         print("FEHLER: Kein USB-Stick unter /media/usb gefunden! Breche ab.")
-        # Eject the CD if USB storage is not available
         subprocess.run(["eject", device_path])
-        # Clean up: remove device from active rips list in a thread-safe manner
         with lock:
             if device_path in active_rips:
                 active_rips.remove(device_path)
         return
         
     # Retrieve album metadata and tracklist from MusicBrainz using the CD's unique disc ID
-    # Requesting "recordings" includes individual track titles for renaming WAV files
     print("Lese Disc-ID und suche auf MusicBrainz...")
     artist, album = None, None
     track_titles = []
@@ -92,7 +88,7 @@ def start_ripping(device_path: str):
         disc = discid.read(device_path)
         # Query MusicBrainz database for this disc ID, requesting artist and tracklist information
         result = musicbrainzngs.get_releases_by_discid(disc.id, includes=["artists", "recordings"])
-        # Extract artist, album, and track titles from the first matching release
+        
         if "disc" in result and result["disc"].get("release-list"):
             release = result["disc"]["release-list"][0]
             artist = release.get("artist-credit-phrase", "Unknown Artist")
@@ -107,124 +103,117 @@ def start_ripping(device_path: str):
                         track_titles.append(title)
                         
             print(f"Erkannt: {artist} - {album} ({len(track_titles)} Tracks gefunden)")
-    # Gracefully handle any errors during metadata retrieval (network issues, timeouts, unrecognized disc, etc.)
     except Exception as e:
         print(f"Keine Metadaten gefunden oder Zeitüberschreitung ({e}). Nutze Fallback-Namen.")
 
-    # Generate output directory name based on metadata availability
-    # Prefer descriptive names (Artist - Album) but fall back to timestamp-based names if metadata is unavailable
+    # Set fallback values for metadata if MusicBrainz failed (used for tags)
+    tag_artist = artist if artist else "Unknown Artist"
+    tag_album = album if album else "Unknown Album"
+
+    # Generate output directory name
     if artist and album:
         folder_name = f"{clean_filename(artist)} - {clean_filename(album)}"
     else:
-        # Use timestamp as fallback name for unidentified CDs
         folder_name = f"rip_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
         
-    # Construct the full output directory path on the USB storage
     rip_dir = f"/media/usb/{folder_name}"
     
-    # Handle case where directory already exists (e.g., same CD ripped multiple times)
-    # Append timestamp to ensure unique directory names
+    # Append timestamp to ensure unique directory names if it already exists
     if os.path.exists(rip_dir):
         rip_dir += f"_{datetime.now().strftime('%H%M%S')}"
         
-    # Create the output directory (and any parent directories if needed)
     os.makedirs(rip_dir, exist_ok=True)
     
     print(f"Starte Ripping-Prozess in {rip_dir} (Timeout: 1 Stunde)...")
     
-    # Execute the actual CD ripping operation with error handling
     try:
-        # cdparanoia parameters:
-        # -d: specify device path to read from
-        # -B: batch mode (automatically create numbered track files)
-        # timeout: Kill the process if it hangs for more than 3600 seconds (1 hour) due to unreadable discs
+        # Execute the actual CD ripping operation with cdparanoia
         result = subprocess.run(
             ["cdparanoia", "-d", device_path, "-B"],
-            cwd=rip_dir,  # Set output directory for extracted audio files
-            capture_output=True,  # Capture stdout and stderr for error checking
-            text=True,  # Return output as strings instead of bytes
-            timeout=3600  # Global timeout to prevent system lockups on bad media
+            cwd=rip_dir,
+            capture_output=True,
+            text=True,
+            timeout=3600
         )
         
-        # Check if cdparanoia completed successfully (return code 0 indicates success)
         if result.returncode == 0:
-            print("Ripping erfolgreich abgeschlossen! Benenne Tracks um...")
+            print("Ripping erfolgreich abgeschlossen! Starte FLAC-Konvertierung und Tagging...")
             
-            # If track titles were retrieved from MusicBrainz, rename generic WAV files
-            if track_titles:
-                for filename in sorted(os.listdir(rip_dir)):
-                    if filename.endswith(".wav"):
-                        # Extract track number from default cdparanoia filenames (e.g., track01.cdda.wav)
-                        match = re.search(r'track(\d+)', filename, re.IGNORECASE)
-                        if match:
-                            track_num = int(match.group(1))
-                            # Ensure the track number matches an entry in our retrieved track list
-                            if 1 <= track_num <= len(track_titles):
-                                clean_title = clean_filename(track_titles[track_num - 1])
-                                new_filename = f"{track_num:02d} - {clean_title}.wav"
-                                
-                                old_path = os.path.join(rip_dir, filename)
-                                new_path = os.path.join(rip_dir, new_filename)
-                                
-                                # Rename file to include track number and sanitized title
-                                os.rename(old_path, new_path)
-                                print(f"Umbenannt: {filename} -> {new_filename}")
+            # Iterate through all ripped WAV files for conversion
+            for filename in sorted(os.listdir(rip_dir)):
+                if filename.endswith(".wav"):
+                    # Extract track number from generic cdparanoia filename
+                    match = re.search(r'track(\d+)', filename, re.IGNORECASE)
+                    if match:
+                        track_num = int(match.group(1))
+                        
+                        # Determine track title for filename and tags
+                        if track_titles and 1 <= track_num <= len(track_titles):
+                            tag_title = track_titles[track_num - 1]
+                        else:
+                            tag_title = f"Track {track_num:02d}"
+                            
+                        clean_title = clean_filename(tag_title)
+                        new_filename = f"{track_num:02d} - {clean_title}.flac"
+                        
+                        old_path = os.path.join(rip_dir, filename)
+                        new_path = os.path.join(rip_dir, new_filename)
+                        
+                        print(f"Konvertiere {filename} zu FLAC...")
+                        
+                        # Convert to FLAC and embed metadata tags
+                        # -8 specifies highest compression level (smallest file size, no quality loss)
+                        flac_cmd = [
+                            "flac", "-8",
+                            "-T", f"ARTIST={tag_artist}",
+                            "-T", f"ALBUM={tag_album}",
+                            "-T", f"TITLE={tag_title}",
+                            "-T", f"TRACKNUMBER={track_num}",
+                            old_path,
+                            "-o", new_path
+                        ]
+                        
+                        flac_result = subprocess.run(flac_cmd, capture_output=True, text=True)
+                        
+                        if flac_result.returncode == 0:
+                            # Delete original WAV file to save space on USB drive
+                            os.remove(old_path)
+                            print(f"Erfolgreich getaggt: {new_filename}")
+                        else:
+                            print(f"Fehler bei FLAC-Konvertierung von {filename}: {flac_result.stderr}")
+                            
             print("Alle Dateien wurden erfolgreich verarbeitet!")
         else:
-            # Log error details from cdparanoia if the operation failed (e.g., DVD inserted)
             print("Fehler beim Rippen (möglicherweise ungültiges Medium):", result.stderr)
             
     except subprocess.TimeoutExpired:
-        # This triggers if cdparanoia takes longer than the specified timeout (e.g. infinite loop on deep scratch)
         print(f"KRITISCHER FEHLER: Ripping-Timeout (1 Stunde) überschritten! Breche Prozess hart ab.")
     
     except Exception as e:
-        # Catch any other unforeseen system errors
         print(f"Unerwarteter Fehler während des Ripping-Vorgangs: {e}")
         
     finally:
-        # Always eject the CD after ripping attempt (successful, failed, or timed out)
         print(f"Werfe CD aus {device_path} aus...")
         subprocess.run(["eject", device_path])
         
-        # Cleanup: Mark the device as no longer being ripped, allowing future rip requests
-        # Use lock to ensure thread-safe access to the active_rips set
         with lock:
             if device_path in active_rips:
                 active_rips.remove(device_path)
         print(f"Laufwerk {device_path} ist wieder bereit.")
 
-# Health check endpoint to verify the API is running
 @app.get("/")
 def read_root():
-    """Return API status indicating the service is operational with MusicBrainz support."""
-    return {"status": "RipRobot2 mit MusicBrainz-Integration und Timeout-Sicherung!"}
+    """Return API status indicating the service is operational."""
+    return {"status": "RipRobot2 bereit (Mit FLAC-Tagging)!"}
 
-# Endpoint to trigger a new CD rip operation
 @app.post("/trigger-rip")
 def trigger_rip(background_tasks: BackgroundTasks, device: str = "sr0"):
-    """
-    Initiate an asynchronous CD ripping operation.
-    
-    Parameters:
-    - device: The CD drive device name (default: sr0 for /dev/sr0)
-    
-    Returns:
-    - Status message indicating whether the rip was queued or if one is already in progress
-    """
-    # Construct full device path from device name
     device_path = f"/dev/{device}"
-    
-    # Check if this device is already being ripped (concurrency control)
-    # Use lock to ensure thread-safe access to active_rips set
     with lock:
         if device_path in active_rips:
-            # Reject new rip request if device is already in use
             print(f"Ignoriere Trigger: {device_path} wird bereits bearbeitet.")
             return {"message": "Rip läuft bereits"}
-        # Mark this device as active to prevent concurrent operations
         active_rips.add(device_path)
-    
-    # Queue the ripping operation to run in the background without blocking the HTTP response
+        
     background_tasks.add_task(start_ripping, device_path)
     return {"message": f"Rip für {device_path} erfolgreich getriggert"}

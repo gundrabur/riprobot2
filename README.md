@@ -8,13 +8,15 @@ The application provides a modern REST API for triggering rip operations and man
 
 ## Features
 
-- **Automated CD Ripping**: Automatically detects and rips audio CDs using cdparanoia
-- **MusicBrainz Integration**: Retrieves album metadata (artist, title) to organize files intelligently
-- **Asynchronous Processing**: Handles rip operations in the background via FastAPI BackgroundTasks
+- **Automated CD Ripping**: Automatically detects and rips audio CDs using cdparanoia with robust error handling
+- **MusicBrainz Integration**: Retrieves complete album metadata including artist, title, and full tracklist for intelligent organization
+- **FLAC Conversion & Tagging**: Automatically converts extracted WAV files to FLAC format with metadata tags (artist, album, track number, title)
+- **Intelligent Timeouts**: Network timeouts (60 seconds) for MusicBrainz API calls and extraction timeouts (1 hour) for CD ripping to prevent hanging
+- **Asynchronous Processing**: Handles rip operations in the background via FastAPI BackgroundTasks without blocking API responses
 - **Concurrency Control**: Prevents simultaneous operations on the same device using thread-safe locks
-- **Multiple Audio Format Support**: Extracts audio using cdparanoia with built-in FLAC and MP3 encoding capabilities
-- **Organized Output**: Creates directory structures based on artist and album metadata for easy navigation
-- **Automatic Device Ejection**: Safely ejects CDs after successful ripping
+- **High-Quality Compression**: FLAC compression level 8 (highest) for maximum file quality with minimum storage overhead
+- **Organized Output**: Creates directory structures based on artist and album metadata with properly named tracks (e.g., "01 - Track Title.flac")
+- **Automatic Device Ejection**: Safely ejects CDs after ripping completion or failure
 - **REST API**: Web-based interface for triggering rips and monitoring status
 - **Docker Containerized**: Complete environment encapsulation for consistent deployments
 
@@ -106,7 +108,7 @@ Returns the API status.
 #### 2. Trigger CD Rip
 **POST** `/trigger-rip`
 
-Initiates an asynchronous CD ripping operation.
+Initiates an asynchronous CD ripping operation with automatic metadata retrieval, FLAC conversion, and tagging.
 
 **Parameters:**
 - `device` (query string, optional): CD drive device name (default: `sr0` for `/dev/sr0`)
@@ -116,45 +118,69 @@ Initiates an asynchronous CD ripping operation.
 curl -X POST http://localhost:8000/trigger-rip?device=sr0
 ```
 
-**Response:**
+**Response (Already Ripping):**
 ```json
-{"message": "Rip läuft bereits"}  # If already ripping
+{"message": "Rip läuft bereits"}
 ```
 
-or
-
+**Response (New Rip Queued):**
 ```json
-{"message": "Rip queued"}  # If new rip is queued
+{"message": "Rip für /dev/sr0 erfolgreich getriggert"}
 ```
+
+**Processing Steps:**
+1. Waits 5 seconds for CD to stabilize
+2. Verifies USB storage availability (60s timeout)
+3. Queries MusicBrainz for album metadata and tracklist (60s timeout)
+4. Extracts tracks with cdparanoia (3600s/1-hour timeout)
+5. Converts WAV to FLAC with maximum compression
+6. Embeds metadata tags in FLAC files
+7. Cleans up original WAV files
+8. Ejects CD
 
 ---
 
 ### Workflow
 
 1. **CD Placement**: Insert an audio CD into the drive
-2. **Automatic Detection**: The system detects the CD presence (optional: trigger via API)
-3. **Metadata Retrieval**: RipRobot queries MusicBrainz for album information
-4. **Directory Creation**: Creates organized folders using artist and album names
-5. **Audio Extraction**: Runs cdparanoia to extract all tracks
-6. **Automatic Ejection**: Safely ejects the CD after completion
-7. **File Organization**: Ripped tracks are stored in `/media/usb/[Artist] - [Album]/`
+2. **API Trigger**: Trigger ripping via POST `/trigger-rip` endpoint (manual or automatic detection)
+3. **Metadata Retrieval**: RipRobot queries MusicBrainz for:
+   - Album and artist information
+   - Complete tracklist with individual track titles
+   - Disc ID matching and validation
+4. **Directory Creation**: Creates organized folders using artist and album names (fallback: timestamp-based if unidentified)
+5. **Audio Extraction**: Runs cdparanoia (with 1-hour timeout protection) to extract all tracks as WAV files
+6. **FLAC Conversion**: Automatically converts each WAV file to FLAC format with:
+   - Maximum compression level (8) for optimal file size
+   - Embedded metadata tags: Artist, Album, Track Number, Track Title
+   - Original WAV files deleted after successful conversion
+7. **File Organization**: Tracks are named with track numbers and titles ("01 - Song Title.flac")
+8. **Automatic Ejection**: Safely ejects the CD after completion or on error
+9. **Output Location**: Ripped tracks stored in `/media/usb/[Artist] - [Album]/`
 
 ### Output Directory Structure
 
 ```
 /media/usb/
 ├── The Beatles - Abbey Road/
-│   ├── track01.wav
-│   ├── track02.wav
+│   ├── 01 - Come Together.flac
+│   ├── 02 - Something.flac
+│   ├── 03 - Maxwell's Silver Hammer.flac
 │   └── ...
 ├── Pink Floyd - The Wall/
-│   ├── track01.wav
-│   ├── track02.wav
+│   ├── 01 - In the Flesh?.flac
+│   ├── 02 - The Thin Ice.flac
 │   └── ...
-└── rip_2026-08-30_15-45-32/  # Fallback for unidentified CDs
-    ├── track01.wav
+└── rip_2026-08-30_15-45-32/  # Fallback for unidentified CDs (timestamp-based)
+    ├── 01 - Track 01.flac
     └── ...
 ```
+
+All FLAC files contain embedded metadata:
+- Artist name
+- Album title
+- Track number
+- Track title
 
 ## Project Structure
 
@@ -213,10 +239,12 @@ The default output path is `/media/usb`. To change it:
 
 - **FastAPI**: Modern, fast Python web framework for building APIs
 - **Uvicorn**: ASGI server for running the FastAPI application
-- **cdparanoia**: High-quality CD audio extraction tool
+- **cdparanoia**: High-quality CD audio extraction tool with timeout protection
 - **discid**: Python library for reading CD disc IDs
-- **musicbrainzngs**: Python client for MusicBrainz metadata database
+- **musicbrainzngs**: Python client for MusicBrainz metadata database with timeout handling
+- **flac**: FLAC codec for lossless audio compression and metadata tagging
 - **threading**: Python threading for concurrency control and async operations
+- **socket**: Global timeout configuration for network operations
 
 ### Key Implementation Features
 
@@ -224,11 +252,26 @@ The default output path is `/media/usb`. To change it:
 
 2. **Asynchronous Ripping**: BackgroundTasks run ripping operations without blocking the HTTP response
 
-3. **Error Handling**: Gracefully handles unrecognized CDs, missing metadata, and unavailable storage
+3. **Timeout Protection**:
+   - **Network Timeout**: 60-second timeout on MusicBrainz API calls to prevent indefinite hangs
+   - **Extraction Timeout**: 3600-second (1-hour) timeout on cdparanoia process to abort stuck operations
+   - Graceful error handling when timeouts occur
 
-4. **Metadata Fallback**: Uses timestamp-based naming when MusicBrainz metadata is unavailable
+4. **FLAC Conversion & Tagging**:
+   - Automatic conversion from WAV to FLAC format
+   - Maximum compression level (8) for minimal file size without quality loss
+   - Embedded metadata tags from MusicBrainz (artist, album, track number, title)
+   - Original WAV files cleaned up after successful conversion
 
-5. **Device Management**: Automatically tracks and releases devices to prevent conflicts
+5. **Comprehensive Metadata Handling**:
+   - Retrieves complete tracklists from MusicBrainz
+   - Matches extracted tracks with titles from metadata
+   - Intelligent naming: "NN - Track Title.flac" format
+   - Fallback to generic naming if metadata unavailable
+
+6. **Error Handling**: Gracefully handles network timeouts, unrecognized CDs, missing metadata, FLAC conversion failures, and unavailable storage
+
+7. **Device Management**: Automatically tracks and releases devices to prevent conflicts
 
 ## Development
 
@@ -308,14 +351,24 @@ For issues, feature requests, or contributions:
 
 ## Changelog
 
-### Version 2.0.0 (Current)
+### Version 2.1.0 (Current)
+- **FLAC Conversion**: Automatic conversion of extracted WAV files to FLAC format with maximum compression
+- **Metadata Tagging**: Embedded FLAC tags (artist, album, track number, title) from MusicBrainz
+- **Tracklist Integration**: Automatic retrieval and application of individual track titles
+- **Timeout Protection**: 60-second API timeout and 1-hour extraction timeout to prevent hanging
+- **Improved Error Handling**: Specific handling for timeout exceptions and FLAC conversion failures
+- **Enhanced File Naming**: Track numbers and titles in standardized format ("NN - Title.flac")
+
+### Version 2.0.0
 - Initial release with FastAPI backend
-- MusicBrainz metadata integration
+- MusicBrainz metadata integration (artist/album only)
 - Docker containerization
-- Asynchronous ripping operations
+- Asynchronous ripping operations with cdparanoia
 - REST API for triggering rips
+- WAV output format
 
 ---
 
-**Last Updated**: August 30, 2026  
-**Maintainer**: RipRobot Contributors
+**Last Updated**: August 30, 2026 (v2.1.0)  
+**Maintainer**: RipRobot Contributors  
+**Status**: Active Development
