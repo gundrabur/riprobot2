@@ -26,6 +26,9 @@ import musicbrainzngs
 # re: Regular expressions for validating and cleaning filenames
 import re
 
+# socket: Set global network timeouts to prevent API calls from hanging indefinitely
+import socket
+
 # Initialize FastAPI application
 app = FastAPI(title="RipRobot2 API")
 
@@ -55,9 +58,9 @@ def start_ripping(device_path: str):
     2. Verifying USB storage is available
     3. Retrieving album metadata and tracklist from MusicBrainz
     4. Creating organized output directory
-    5. Executing cdparanoia to extract audio tracks
+    5. Executing cdparanoia to extract audio tracks (with global timeout)
     6. Renaming extracted WAV files to actual track titles
-    7. Ejecting the CD after completion
+    7. Ejecting the CD after completion or failure
     """
     # Initial delay to allow CD to stabilize and be fully recognized by the system
     print(f"Audio-CD in Laufwerk {device_path} erkannt! Warte 5 Sekunden...")
@@ -82,6 +85,9 @@ def start_ripping(device_path: str):
     track_titles = []
     
     try:
+        # Set a 60-second timeout for network requests to allow slow or overloaded APIs time to respond
+        socket.setdefaulttimeout(60)
+
         # Read the unique identifier of the CD from the physical disc
         disc = discid.read(device_path)
         # Query MusicBrainz database for this disc ID, requesting artist and tracklist information
@@ -101,9 +107,9 @@ def start_ripping(device_path: str):
                         track_titles.append(title)
                         
             print(f"Erkannt: {artist} - {album} ({len(track_titles)} Tracks gefunden)")
-    # Gracefully handle any errors during metadata retrieval (network issues, unrecognized disc, etc.)
+    # Gracefully handle any errors during metadata retrieval (network issues, timeouts, unrecognized disc, etc.)
     except Exception as e:
-        print(f"Keine Metadaten gefunden ({e}). Nutze Fallback-Namen.")
+        print(f"Keine Metadaten gefunden oder Zeitüberschreitung ({e}). Nutze Fallback-Namen.")
 
     # Generate output directory name based on metadata availability
     # Prefer descriptive names (Artist - Album) but fall back to timestamp-based names if metadata is unavailable
@@ -124,18 +130,20 @@ def start_ripping(device_path: str):
     # Create the output directory (and any parent directories if needed)
     os.makedirs(rip_dir, exist_ok=True)
     
-    print(f"Starte Ripping-Prozess in {rip_dir}...")
+    print(f"Starte Ripping-Prozess in {rip_dir} (Timeout: 1 Stunde)...")
     
     # Execute the actual CD ripping operation with error handling
     try:
         # cdparanoia parameters:
         # -d: specify device path to read from
         # -B: batch mode (automatically create numbered track files)
+        # timeout: Kill the process if it hangs for more than 3600 seconds (1 hour) due to unreadable discs
         result = subprocess.run(
             ["cdparanoia", "-d", device_path, "-B"],
             cwd=rip_dir,  # Set output directory for extracted audio files
             capture_output=True,  # Capture stdout and stderr for error checking
-            text=True  # Return output as strings instead of bytes
+            text=True,  # Return output as strings instead of bytes
+            timeout=3600  # Global timeout to prevent system lockups on bad media
         )
         
         # Check if cdparanoia completed successfully (return code 0 indicates success)
@@ -163,14 +171,22 @@ def start_ripping(device_path: str):
                                 print(f"Umbenannt: {filename} -> {new_filename}")
             print("Alle Dateien wurden erfolgreich verarbeitet!")
         else:
-            # Log error details from cdparanoia if the operation failed
-            print("Fehler beim Rippen:", result.stderr)
+            # Log error details from cdparanoia if the operation failed (e.g., DVD inserted)
+            print("Fehler beim Rippen (möglicherweise ungültiges Medium):", result.stderr)
             
-        # Always eject the CD after ripping attempt (successful or not)
+    except subprocess.TimeoutExpired:
+        # This triggers if cdparanoia takes longer than the specified timeout (e.g. infinite loop on deep scratch)
+        print(f"KRITISCHER FEHLER: Ripping-Timeout (1 Stunde) überschritten! Breche Prozess hart ab.")
+    
+    except Exception as e:
+        # Catch any other unforeseen system errors
+        print(f"Unerwarteter Fehler während des Ripping-Vorgangs: {e}")
+        
+    finally:
+        # Always eject the CD after ripping attempt (successful, failed, or timed out)
         print(f"Werfe CD aus {device_path} aus...")
         subprocess.run(["eject", device_path])
         
-    finally:
         # Cleanup: Mark the device as no longer being ripped, allowing future rip requests
         # Use lock to ensure thread-safe access to the active_rips set
         with lock:
@@ -182,7 +198,7 @@ def start_ripping(device_path: str):
 @app.get("/")
 def read_root():
     """Return API status indicating the service is operational with MusicBrainz support."""
-    return {"status": "RipRobot2 mit MusicBrainz-Integration!"}
+    return {"status": "RipRobot2 mit MusicBrainz-Integration und Timeout-Sicherung!"}
 
 # Endpoint to trigger a new CD rip operation
 @app.post("/trigger-rip")
