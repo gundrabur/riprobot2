@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     flac \
     eject \
     libdiscid0 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
