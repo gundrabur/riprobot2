@@ -29,11 +29,17 @@
         <header class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-8 border-b border-gray-800 pb-4">
             <div>
                 <h1 class="text-3xl font-bold text-white tracking-tight">RipRobot<span class="text-blue-500">2</span></h1>
-                <p class="text-sm text-gray-400 mt-1">Headless CD Ripping Station</p>
+                <p class="text-sm text-gray-400 mt-1" data-i18n="app.subtitle">Autonome CD-Ripping-Station</p>
             </div>
-            <div class="grid grid-cols-2 gap-2 w-full sm:w-auto bg-gray-900 p-1 rounded-lg border border-gray-800">
-                <button onclick="switchTab('dashboard')" id="btn-dashboard" class="px-3 sm:px-4 py-2 rounded-md bg-gray-800 text-white font-medium shadow-sm transition">Dashboard</button>
-                <button onclick="switchTab('settings')" id="btn-settings" class="px-3 sm:px-4 py-2 rounded-md text-gray-400 hover:text-white font-medium transition">Einstellungen</button>
+            <div class="flex flex-col sm:items-end gap-2 w-full sm:w-auto">
+                <div class="grid grid-cols-2 gap-2 w-full sm:w-auto bg-gray-900 p-1 rounded-lg border border-gray-800">
+                    <button onclick="switchTab('dashboard')" id="btn-dashboard" class="px-3 sm:px-4 py-2 rounded-md bg-gray-800 text-white font-medium shadow-sm transition" data-i18n="nav.dashboard">Dashboard</button>
+                    <button onclick="switchTab('settings')" id="btn-settings" class="px-3 sm:px-4 py-2 rounded-md text-gray-400 hover:text-white font-medium transition" data-i18n="nav.settings">Einstellungen</button>
+                </div>
+                <div class="flex rounded-md border border-gray-800 overflow-hidden" role="group" aria-label="Sprache" data-i18n-aria-label="language.label">
+                    <button type="button" id="lang-de" onclick="setLanguage('de')" class="px-3 py-1 text-xs font-semibold transition">DE</button>
+                    <button type="button" id="lang-en" onclick="setLanguage('en')" class="px-3 py-1 text-xs font-semibold transition">EN</button>
+                </div>
             </div>
         </header>
 
@@ -44,17 +50,17 @@
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-lg">
                 <div class="grid grid-cols-1 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-6 items-start mb-6">
                     <div class="min-w-0">
-                        <h2 class="text-lg font-semibold text-gray-300">Aktueller Status</h2>
+                        <h2 class="text-lg font-semibold text-gray-300" data-i18n="dashboard.currentStatus">Aktueller Status</h2>
                         <div class="mt-2 flex items-start gap-3 min-w-0">
                             <span id="status-indicator" class="relative flex h-4 w-4 shrink-0 mt-2">
                               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-gray-500 opacity-75"></span>
                               <span class="relative inline-flex rounded-full h-4 w-4 bg-gray-500"></span>
                             </span>
-                            <span id="status-text" class="min-w-0 text-xl sm:text-2xl font-bold text-white break-words">Warte auf System...</span>
+                            <span id="status-text" class="min-w-0 text-xl sm:text-2xl font-bold text-white break-words" data-i18n="status.waiting">Warte auf System...</span>
                         </div>
                     </div>
                     <div class="min-w-0 text-left md:text-right">
-                        <p class="text-sm text-gray-500 uppercase tracking-wider font-semibold">Erkanntes Medium</p>
+                        <p class="text-sm text-gray-500 uppercase tracking-wider font-semibold" data-i18n="dashboard.detectedMedia">Erkanntes Medium</p>
                         <p id="track-artist" class="text-lg font-medium text-gray-200 mt-1 break-words">-</p>
                         <p id="track-album" class="text-md text-gray-400 break-words">-</p>
                     </div>
@@ -63,7 +69,7 @@
                 <!-- Progress Bar -->
                 <div class="mt-8">
                     <div class="flex justify-between text-sm mb-2">
-                        <span class="text-gray-400 font-medium" id="progress-label">Fortschritt</span>
+                        <span class="text-gray-400 font-medium" id="progress-label" data-i18n="dashboard.progress">Fortschritt</span>
                         <span class="text-white font-bold" id="progress-percent">0%</span>
                     </div>
                     <div class="w-full bg-gray-800 rounded-full h-4 overflow-hidden border border-gray-700">
@@ -73,13 +79,13 @@
             </div>
 
             <div class="flex flex-wrap justify-end gap-3">
-                <button id="eject-button" onclick="ejectDrive()" title="CD auswerfen" class="bg-gray-800 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-800 border border-gray-700 text-gray-300 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                <button id="eject-button" onclick="ejectDrive()" title="CD auswerfen" data-i18n-title="actions.ejectTitle" class="bg-gray-800 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gray-800 border border-gray-700 text-gray-300 px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15h14L12 5 5 15zM5 19h14"></path></svg>
-                    <span>Auswerfen</span>
+                    <span data-i18n="actions.eject">Auswerfen</span>
                 </button>
                 <button onclick="triggerRip()" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-6 py-2 rounded-lg text-sm font-medium transition flex items-center space-x-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    <span>Manuellen Rip erzwingen</span>
+                    <span data-i18n="actions.manualRip">Rip manuell starten</span>
                 </button>
             </div>
         </div>
@@ -87,53 +93,53 @@
         <!-- SETTINGS TAB -->
         <div id="tab-settings" class="hidden">
             <div class="bg-gray-900 border border-gray-800 rounded-xl p-6 shadow-lg">
-                <h2 class="text-xl font-bold text-white mb-6">System-Einstellungen</h2>
+                <h2 class="text-xl font-bold text-white mb-6" data-i18n="settings.title">System-Einstellungen</h2>
                 
                 <form id="settings-form" class="space-y-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <!-- Format -->
                         <div>
-                            <label class="block text-sm font-medium text-gray-400 mb-2">Ausgabeformat</label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2" data-i18n="settings.outputFormat">Ausgabeformat</label>
                             <select id="set-format" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 transition">
-                                <option value="FLAC">FLAC (Verlustfrei, Getaggt)</option>
-                                <option value="MP3">MP3 (V0 Qualität, Getaggt)</option>
-                                <option value="WAV">WAV (Rohdaten, Keine Tags)</option>
+                                <option value="FLAC" data-i18n="format.flac">FLAC (verlustfrei, getaggt)</option>
+                                <option value="MP3" data-i18n="format.mp3">MP3 (V0-Qualität, getaggt)</option>
+                                <option value="WAV" data-i18n="format.wav">WAV (Rohdaten, keine Tags)</option>
                             </select>
                         </div>
                         
                         <!-- Zielordner -->
                         <div>
-                            <label class="block text-sm font-medium text-gray-400 mb-2">Zielverzeichnis (USB-Stick)</label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2" data-i18n="settings.outputPath">Zielverzeichnis (USB-Stick)</label>
                             <input type="text" id="set-path" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 transition" placeholder="/media/usb">
                         </div>
 
                         <!-- Paranoia Mode -->
                         <div>
-                            <label class="block text-sm font-medium text-gray-400 mb-2">Auslese-Genauigkeit</label>
+                            <label class="block text-sm font-medium text-gray-400 mb-2" data-i18n="settings.accuracy">Auslesegenauigkeit</label>
                             <select id="set-paranoia" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 transition">
-                                <option value="safe">Sicher (Standard, Kratzer-Korrektur aktiv)</option>
-                                <option value="fast">Schnell (Weniger Überprüfung)</option>
-                                <option value="disable">Ausgeschaltet (Ignoriert alle Fehler)</option>
+                                <option value="safe" data-i18n="accuracy.safe">Sicher (Standard, Kratzerkorrektur aktiv)</option>
+                                <option value="fast" data-i18n="accuracy.fast">Schnell (weniger Überprüfung)</option>
+                                <option value="disable" data-i18n="accuracy.disabled">Ausgeschaltet (ignoriert Lesefehler)</option>
                             </select>
                         </div>
 
                         <!-- Timeouts -->
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2">MusicBrainz Timeout (Sek)</label>
+                                <label class="block text-sm font-medium text-gray-400 mb-2" data-i18n="settings.networkTimeout">MusicBrainz-Timeout (Sek.)</label>
                                 <input type="number" id="set-net-timeout" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 transition">
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-400 mb-2">Rip-Abbruch nach (Sek)</label>
+                                <label class="block text-sm font-medium text-gray-400 mb-2" data-i18n="settings.ripTimeout">Rip-Abbruch nach (Sek.)</label>
                                 <input type="number" id="set-rip-timeout" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 transition">
                             </div>
                         </div>
                     </div>
 
                     <div class="pt-4 border-t border-gray-800 flex justify-between items-center">
-                        <span id="save-msg" class="text-green-400 text-sm font-medium opacity-0 transition-opacity">Einstellungen gespeichert!</span>
+                        <span id="save-msg" class="text-green-400 text-sm font-medium opacity-0 transition-opacity" data-i18n="settings.saved">Einstellungen gespeichert!</span>
                         <button type="button" onclick="saveSettings()" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-medium transition shadow-lg shadow-blue-500/20">
-                            Speichern
+                            <span data-i18n="actions.save">Speichern</span>
                         </button>
                     </div>
                 </form>
@@ -143,6 +149,163 @@
     </div>
 
     <script>
+        const translations = {
+            de: {
+                "document.title": "RipRobot2 Steuerzentrale",
+                "language.label": "Sprache",
+                "app.subtitle": "Autonome CD-Ripping-Station",
+                "nav.dashboard": "Dashboard",
+                "nav.settings": "Einstellungen",
+                "dashboard.currentStatus": "Aktueller Status",
+                "dashboard.detectedMedia": "Erkanntes Medium",
+                "dashboard.progress": "Fortschritt",
+                "actions.eject": "Auswerfen",
+                "actions.ejectTitle": "CD auswerfen",
+                "actions.manualRip": "Rip manuell starten",
+                "actions.save": "Speichern",
+                "settings.title": "System-Einstellungen",
+                "settings.outputFormat": "Ausgabeformat",
+                "settings.outputPath": "Zielverzeichnis (USB-Stick)",
+                "settings.accuracy": "Auslesegenauigkeit",
+                "settings.networkTimeout": "MusicBrainz-Timeout (Sek.)",
+                "settings.ripTimeout": "Rip-Abbruch nach (Sek.)",
+                "settings.saved": "Einstellungen gespeichert!",
+                "format.flac": "FLAC (verlustfrei, getaggt)",
+                "format.mp3": "MP3 (V0-Qualität, getaggt)",
+                "format.wav": "WAV (Rohdaten, keine Tags)",
+                "accuracy.safe": "Sicher (Standard, Kratzerkorrektur aktiv)",
+                "accuracy.fast": "Schnell (weniger Überprüfung)",
+                "accuracy.disabled": "Ausgeschaltet (ignoriert Lesefehler)",
+                "status.waiting": "Warte auf System...",
+                "status.ready": "Bereit. Lege eine CD ein.",
+                "status.systemReady": "System bereit. Bitte CD einlegen.",
+                "status.readingDisc": "Lese Disc und warte 5 Sekunden...",
+                "status.outputMissing": "Zielverzeichnis {path} nicht gefunden!",
+                "status.searchingMetadata": "Suche Metadaten auf MusicBrainz...",
+                "status.startingRip": "Starte Rip-Vorgang...",
+                "status.rippingTrack": "Rippe Track {current} von {total}: {title}",
+                "status.convertingFiles": "Konvertiere {count} Dateien in {format}...",
+                "status.converting": "Konvertiere in {format}...",
+                "status.syncingUsb": "Speichere Daten final auf USB (bitte warten)...",
+                "status.success": "Vorgang erfolgreich abgeschlossen!",
+                "status.ripError": "Fehler beim Rippen der CD.",
+                "status.timeout": "Zeitüberschreitung! CD konnte nicht gelesen werden.",
+                "status.unexpectedError": "Unerwarteter Fehler: {error}",
+                "status.queueingRip": "Rip-Vorgang wird gestartet...",
+                "metadata.unknownArtist": "Unbekannter Interpret",
+                "metadata.unknownAlbum": "Unbekanntes Album",
+                "error.backend": "Backend nicht erreichbar.",
+                "error.loadSettings": "Einstellungen konnten nicht geladen werden.",
+                "error.saveSettings": "Einstellungen konnten nicht gespeichert werden.",
+                "error.startRip": "Rip-Vorgang konnte nicht gestartet werden.",
+                "error.ejectBusy": "Auswerfen ist während eines laufenden Vorgangs nicht möglich.",
+                "error.eject": "Laufwerk konnte nicht ausgeworfen werden."
+            },
+            en: {
+                "document.title": "RipRobot2 Control Center",
+                "language.label": "Language",
+                "app.subtitle": "Headless CD ripping station",
+                "nav.dashboard": "Dashboard",
+                "nav.settings": "Settings",
+                "dashboard.currentStatus": "Current status",
+                "dashboard.detectedMedia": "Detected media",
+                "dashboard.progress": "Progress",
+                "actions.eject": "Eject",
+                "actions.ejectTitle": "Eject CD",
+                "actions.manualRip": "Start rip manually",
+                "actions.save": "Save",
+                "settings.title": "System settings",
+                "settings.outputFormat": "Output format",
+                "settings.outputPath": "Destination folder (USB drive)",
+                "settings.accuracy": "Read accuracy",
+                "settings.networkTimeout": "MusicBrainz timeout (sec.)",
+                "settings.ripTimeout": "Abort rip after (sec.)",
+                "settings.saved": "Settings saved!",
+                "format.flac": "FLAC (lossless, tagged)",
+                "format.mp3": "MP3 (V0 quality, tagged)",
+                "format.wav": "WAV (raw audio, no tags)",
+                "accuracy.safe": "Safe (default, scratch correction enabled)",
+                "accuracy.fast": "Fast (fewer checks)",
+                "accuracy.disabled": "Disabled (ignore read errors)",
+                "status.waiting": "Waiting for system...",
+                "status.ready": "Ready. Insert a CD.",
+                "status.systemReady": "System ready. Please insert a CD.",
+                "status.readingDisc": "Reading disc and waiting 5 seconds...",
+                "status.outputMissing": "Destination folder {path} was not found!",
+                "status.searchingMetadata": "Searching MusicBrainz for metadata...",
+                "status.startingRip": "Starting rip...",
+                "status.rippingTrack": "Ripping track {current} of {total}: {title}",
+                "status.convertingFiles": "Converting {count} files to {format}...",
+                "status.converting": "Converting to {format}...",
+                "status.syncingUsb": "Finishing data transfer to USB (please wait)...",
+                "status.success": "Process completed successfully!",
+                "status.ripError": "Error while ripping the CD.",
+                "status.timeout": "Timeout! The CD could not be read.",
+                "status.unexpectedError": "Unexpected error: {error}",
+                "status.queueingRip": "Starting rip process...",
+                "metadata.unknownArtist": "Unknown artist",
+                "metadata.unknownAlbum": "Unknown album",
+                "error.backend": "Backend is unavailable.",
+                "error.loadSettings": "Settings could not be loaded.",
+                "error.saveSettings": "Settings could not be saved.",
+                "error.startRip": "Rip process could not be started.",
+                "error.ejectBusy": "Ejecting is unavailable while a process is running.",
+                "error.eject": "The drive could not be ejected."
+            }
+        };
+
+        let currentLanguage = localStorage.getItem('riprobot-language') === 'en' ? 'en' : 'de';
+        let latestStatus = null;
+
+        function translate(key, params = {}) {
+            const template = translations[currentLanguage][key] || translations.de[key] || key;
+            return template.replace(/\{(\w+)\}/g, (_, name) => params[name] ?? `{${name}}`);
+        }
+
+        function renderStatus(data) {
+            latestStatus = data;
+            document.getElementById('status-text').innerText = data.message_key
+                ? translate(data.message_key, data.message_params)
+                : data.message;
+            document.getElementById('track-artist').innerText = data.artist === 'Unknown Artist'
+                ? translate('metadata.unknownArtist')
+                : data.artist || "-";
+            document.getElementById('track-album').innerText = data.album === 'Unknown Album'
+                ? translate('metadata.unknownAlbum')
+                : data.album || "-";
+        }
+
+        function applyLanguage() {
+            document.documentElement.lang = currentLanguage;
+            document.title = translate('document.title');
+            document.querySelectorAll('[data-i18n]').forEach(element => {
+                element.textContent = translate(element.dataset.i18n);
+            });
+            document.querySelectorAll('[data-i18n-title]').forEach(element => {
+                element.title = translate(element.dataset.i18nTitle);
+            });
+            document.querySelectorAll('[data-i18n-aria-label]').forEach(element => {
+                element.setAttribute('aria-label', translate(element.dataset.i18nAriaLabel));
+            });
+
+            ['de', 'en'].forEach(language => {
+                const active = language === currentLanguage;
+                const button = document.getElementById(`lang-${language}`);
+                button.setAttribute('aria-pressed', active);
+                button.className = active
+                    ? 'px-3 py-1 text-xs font-semibold bg-blue-600 text-white transition'
+                    : 'px-3 py-1 text-xs font-semibold bg-gray-900 text-gray-400 hover:text-white transition';
+            });
+
+            if (latestStatus) renderStatus(latestStatus);
+        }
+
+        function setLanguage(language) {
+            currentLanguage = language;
+            localStorage.setItem('riprobot-language', language);
+            applyLanguage();
+        }
+
         // --- Tab Navigation ---
         function switchTab(tab) {
             document.getElementById('tab-dashboard').classList.add('hidden');
@@ -162,10 +325,7 @@
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                
-                document.getElementById('status-text').innerText = data.message;
-                document.getElementById('track-artist').innerText = data.artist || "-";
-                document.getElementById('track-album').innerText = data.album || "-";
+                renderStatus(data);
                 
                 const bar = document.getElementById('progress-bar');
                 const percentText = document.getElementById('progress-percent');
@@ -198,7 +358,7 @@
                 bar.className = `h-4 rounded-full ${colorClass.replace('bg-', 'bg-')}`;
 
             } catch (e) {
-                console.error("Kann Backend nicht erreichen.");
+                console.error(translate('error.backend'));
             }
         }
 
@@ -213,7 +373,7 @@
                 document.getElementById('set-net-timeout').value = data.network_timeout;
                 document.getElementById('set-rip-timeout').value = data.rip_timeout;
             } catch (e) {
-                console.error("Fehler beim Laden der Einstellungen.");
+                console.error(translate('error.loadSettings'));
             }
         }
 
@@ -238,7 +398,7 @@
                 msg.classList.remove('opacity-0');
                 setTimeout(() => msg.classList.add('opacity-0'), 3000);
             } catch (e) {
-                alert("Fehler beim Speichern!");
+                alert(translate('error.saveSettings'));
             }
         }
         
@@ -246,7 +406,7 @@
             try {
                 await fetch('/trigger-rip?device=sr0', { method: 'POST' });
             } catch (e) {
-                console.error("Konnte Rip nicht starten.");
+                console.error(translate('error.startRip'));
             }
         }
 
@@ -257,17 +417,17 @@
             try {
                 const res = await fetch('/eject?device=sr0', { method: 'POST' });
                 if (!res.ok) {
-                    const data = await res.json();
-                    throw new Error(data.detail || "Laufwerk konnte nicht ausgeworfen werden.");
+                    throw new Error(translate(res.status === 409 ? 'error.ejectBusy' : 'error.eject'));
                 }
             } catch (e) {
-                alert(e.message || "Laufwerk konnte nicht ausgeworfen werden.");
+                alert(e.message || translate('error.eject'));
             } finally {
                 fetchStatus();
             }
         }
 
         // Start: Status jede Sekunde abrufen
+        applyLanguage();
         setInterval(fetchStatus, 1000);
         fetchStatus();
     </script>

@@ -49,6 +49,8 @@ default_settings = {
 current_status = {
     "state": "idle", # idle, ripping, metadata, converting, success, error
     "message": "Bereit. Lege eine CD ein.",
+    "message_key": "status.ready",
+    "message_params": {},
     "artist": "",
     "album": "",
     "progress": 0
@@ -74,10 +76,12 @@ class SettingsModel(BaseModel):
     network_timeout: int
     rip_timeout: int
 
-def update_status(state, message, artist=None, album=None, progress=0):
+def update_status(state, message, artist=None, album=None, progress=0, message_key=None, message_params=None):
     global current_status
     current_status["state"] = state
     current_status["message"] = message
+    current_status["message_key"] = message_key
+    current_status["message_params"] = message_params or {}
     if artist is not None: current_status["artist"] = artist
     if album is not None: current_status["album"] = album
     current_status["progress"] = max(0, min(100, progress))
@@ -123,7 +127,7 @@ def wait_for_startup_hardware(device_path="/dev/sr0", retry_interval=2):
                         subprocess.run(["eject", device_path], check=True, capture_output=True)
                         with open(STARTUP_EJECT_MARKER, "w") as file:
                             file.write(boot_id)
-                        update_status("idle", "System bereit. Bitte CD einlegen.", "", "", 0)
+                        update_status("idle", "System bereit. Bitte CD einlegen.", "", "", 0, "status.systemReady")
                         return
                     except (OSError, subprocess.CalledProcessError) as error:
                         print(f"[STARTUP] Laufwerk noch nicht bereit: {error}")
@@ -132,11 +136,11 @@ def wait_for_startup_hardware(device_path="/dev/sr0", retry_interval=2):
 def start_ripping(device_path: str):
     settings = load_settings()
     
-    update_status("metadata", "Lese Disc und warte 5 Sekunden...")
+    update_status("metadata", "Lese Disc und warte 5 Sekunden...", message_key="status.readingDisc")
     time.sleep(5)
     
     if not os.path.exists(settings["output_path"]):
-        update_status("error", f"Zielverzeichnis {settings['output_path']} nicht gefunden!")
+        update_status("error", f"Zielverzeichnis {settings['output_path']} nicht gefunden!", message_key="status.outputMissing", message_params={"path": settings["output_path"]})
         subprocess.run(["eject", device_path])
         return
         
@@ -145,7 +149,7 @@ def start_ripping(device_path: str):
     track_sectors = []
     
     try:
-        update_status("metadata", "Suche Metadaten auf MusicBrainz...")
+        update_status("metadata", "Suche Metadaten auf MusicBrainz...", message_key="status.searchingMetadata")
         socket.setdefaulttimeout(settings["network_timeout"])
         disc = discid.read(device_path)
         track_sectors = [track.sectors for track in disc.tracks]
@@ -165,7 +169,7 @@ def start_ripping(device_path: str):
     except Exception as e:
         print(f"MusicBrainz Fehler: {e}")
 
-    update_status("ripping", f"Starte Rip-Vorgang...", artist, album)
+    update_status("ripping", "Starte Rip-Vorgang...", artist, album, message_key="status.startingRip")
 
     folder_name = f"{clean_filename(artist)} - {clean_filename(album)}" if artist != "Unknown Artist" else f"rip_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     rip_dir = os.path.join(settings["output_path"], folder_name)
@@ -206,7 +210,7 @@ def start_ripping(device_path: str):
                 completed_tracks = max(0, len(wav_files) - 1)
                 prog = min(99, int((completed_tracks / total_tracks_expected) * 100))
 
-            update_status("ripping", f"Rippe Track {current_track} von {total_tracks_expected}: {track_title}", artist, album, prog)
+            update_status("ripping", f"Rippe Track {current_track} von {total_tracks_expected}: {track_title}", artist, album, prog, "status.rippingTrack", {"current": current_track, "total": total_tracks_expected, "title": track_title})
             
             time.sleep(2) # Alle 2 Sekunden aktualisieren
         
@@ -215,7 +219,7 @@ def start_ripping(device_path: str):
             total_files = len(wav_files)
             
             if settings["format"] in ["FLAC", "MP3"]:
-                update_status("converting", f"Konvertiere {total_files} Dateien in {settings['format']}...")
+                update_status("converting", f"Konvertiere {total_files} Dateien in {settings['format']}...", message_key="status.convertingFiles", message_params={"count": total_files, "format": settings["format"]})
                 
                 for idx, filename in enumerate(wav_files):
                     track_num = idx + 1
@@ -235,7 +239,7 @@ def start_ripping(device_path: str):
                     
                     subprocess.run(cmd, capture_output=True)
                     os.remove(old_path) # WAV löschen
-                    update_status("converting", f"Konvertiere in {settings['format']}...", artist, album, int(((idx+1)/total_files)*100))
+                    update_status("converting", f"Konvertiere in {settings['format']}...", artist, album, int(((idx+1)/total_files)*100), "status.converting", {"format": settings["format"]})
             else:
                 # Nur umbenennen, wenn WAV gewünscht
                 for idx, filename in enumerate(wav_files):
@@ -245,23 +249,23 @@ def start_ripping(device_path: str):
                     os.rename(os.path.join(rip_dir, filename), new_path)
 
             # --- NEU: Warten bis alles physisch auf dem USB-Stick ist ---
-            update_status("converting", "Speichere Daten final auf USB (Bitte warten)...", artist, album, 99)
+            update_status("converting", "Speichere Daten final auf USB (Bitte warten)...", artist, album, 99, "status.syncingUsb")
             os.sync() # Zwingt Linux, den Cache komplett auf den Stick zu leeren
             # -------------------------------------------------------------
 
-            update_status("success", "Vorgang erfolgreich abgeschlossen!", artist, album, 100)
+            update_status("success", "Vorgang erfolgreich abgeschlossen!", artist, album, 100, "status.success")
         else:
-            update_status("error", "Fehler beim Rippen der CD.")
+            update_status("error", "Fehler beim Rippen der CD.", message_key="status.ripError")
             
     except subprocess.TimeoutExpired:
-        update_status("error", "Timeout! CD konnte nicht gelesen werden.")
+        update_status("error", "Timeout! CD konnte nicht gelesen werden.", message_key="status.timeout")
     except Exception as e:
-        update_status("error", f"Unerwarteter Fehler: {e}")
+        update_status("error", f"Unerwarteter Fehler: {e}", message_key="status.unexpectedError", message_params={"error": str(e)})
         
     finally:
         subprocess.run(["eject", device_path])
         # Reset status after 10 seconds
-        threading.Timer(10.0, lambda: update_status("idle", "Bereit. Lege eine CD ein.", "", "", 0)).start()
+        threading.Timer(10.0, lambda: update_status("idle", "Bereit. Lege eine CD ein.", "", "", 0, "status.ready")).start()
 
 # --- API ENDPUNKTE ---
 
@@ -283,7 +287,7 @@ def trigger_rip(background_tasks: BackgroundTasks, device: str = "sr0"):
     with lock:
         if current_status["state"] != "idle":
             return {"message": "System ist beschäftigt"}
-        update_status("metadata", "Rip-Vorgang wird gestartet...", "", "", 0)
+        update_status("metadata", "Rip-Vorgang wird gestartet...", "", "", 0, "status.queueingRip")
         background_tasks.add_task(start_ripping, f"/dev/{device}")
     return {"message": "Rip getriggert"}
 
