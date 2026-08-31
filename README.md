@@ -17,6 +17,7 @@ The application provides a modern REST API for triggering rip operations and man
 - **High-Quality Compression**: FLAC compression level 8 (highest) for maximum file quality with minimum storage overhead
 - **Organized Output**: Creates directory structures based on artist and album metadata with properly named tracks (e.g., "01 - Track Title.flac")
 - **Automatic Device Ejection**: Safely ejects CDs after ripping completion or failure
+- **Startup Readiness Signal**: Opens the CD tray once per Raspberry Pi boot after the drive and writable USB target are available
 - **REST API**: Web-based interface for triggering rips and monitoring status
 - **Docker Containerized**: Complete environment encapsulation for consistent deployments
 

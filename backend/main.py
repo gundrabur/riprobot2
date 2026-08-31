@@ -1,8 +1,10 @@
-from fastapi import FastAPI, BackgroundTasks
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import subprocess
+import tempfile
 import time
 import os
 import json
@@ -13,7 +15,12 @@ import musicbrainzngs
 import re
 import socket
 
-app = FastAPI(title="RipRobot2 API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threading.Thread(target=wait_for_startup_hardware, daemon=True).start()
+    yield
+
+app = FastAPI(title="RipRobot2 API", lifespan=lifespan)
 
 # CORS für das Frontend erlauben
 app.add_middleware(
@@ -24,6 +31,8 @@ app.add_middleware(
 )
 
 SETTINGS_FILE = "settings.json"
+BOOT_ID_FILE = "/proc/sys/kernel/random/boot_id"
+STARTUP_EJECT_MARKER = "/tmp/riprobot-startup-eject-boot-id"
 lock = threading.Lock()
 musicbrainzngs.set_useragent("RipRobot", "2.0", "AUDIO-RipRobot2@local.host")
 
@@ -65,17 +74,60 @@ class SettingsModel(BaseModel):
     network_timeout: int
     rip_timeout: int
 
-def update_status(state, message, artist="", album="", progress=0):
+def update_status(state, message, artist=None, album=None, progress=0):
     global current_status
     current_status["state"] = state
     current_status["message"] = message
-    if artist: current_status["artist"] = artist
-    if album: current_status["album"] = album
-    if progress > 0: current_status["progress"] = progress
+    if artist is not None: current_status["artist"] = artist
+    if album is not None: current_status["album"] = album
+    current_status["progress"] = max(0, min(100, progress))
     print(f"[{state.upper()}] {message}")
 
 def clean_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
+
+def get_boot_id():
+    try:
+        with open(BOOT_ID_FILE, "r") as file:
+            return file.read().strip()
+    except OSError:
+        return "process"
+
+def output_storage_ready(output_path):
+    if not os.path.isdir(output_path) or not os.path.ismount(output_path):
+        return False
+
+    try:
+        with tempfile.NamedTemporaryFile(prefix=".riprobot-check-", dir=output_path):
+            pass
+        return True
+    except OSError:
+        return False
+
+def wait_for_startup_hardware(device_path="/dev/sr0", retry_interval=2):
+    boot_id = get_boot_id()
+    try:
+        with open(STARTUP_EJECT_MARKER, "r") as file:
+            if file.read().strip() == boot_id:
+                return
+    except OSError:
+        pass
+
+    print("[STARTUP] Warte auf CD-Laufwerk und beschreibbaren USB-Stick...")
+    while True:
+        output_path = load_settings()["output_path"]
+        if os.path.exists(device_path) and output_storage_ready(output_path):
+            with lock:
+                if current_status["state"] == "idle":
+                    try:
+                        subprocess.run(["eject", device_path], check=True, capture_output=True)
+                        with open(STARTUP_EJECT_MARKER, "w") as file:
+                            file.write(boot_id)
+                        update_status("idle", "System bereit. Bitte CD einlegen.", "", "", 0)
+                        return
+                    except (OSError, subprocess.CalledProcessError) as error:
+                        print(f"[STARTUP] Laufwerk noch nicht bereit: {error}")
+        time.sleep(retry_interval)
 
 def start_ripping(device_path: str):
     settings = load_settings()
@@ -90,11 +142,13 @@ def start_ripping(device_path: str):
         
     artist, album = "Unknown Artist", "Unknown Album"
     track_titles = []
+    track_sectors = []
     
     try:
         update_status("metadata", "Suche Metadaten auf MusicBrainz...")
         socket.setdefaulttimeout(settings["network_timeout"])
         disc = discid.read(device_path)
+        track_sectors = [track.sectors for track in disc.tracks]
         result = musicbrainzngs.get_releases_by_discid(disc.id, includes=["artists", "recordings"])
         
         if "disc" in result and result["disc"].get("release-list"):
@@ -127,8 +181,8 @@ def start_ripping(device_path: str):
         if settings["paranoia_mode"] == "fast": rip_args.append("-Y")
         elif settings["paranoia_mode"] == "disable": rip_args.append("-Z")
 
-        # Erwartete Tracks für die Prozentrechnung (Fallback 1, falls keine Metadaten gefunden)
-        total_tracks_expected = len(track_titles) if track_titles else 1
+        total_tracks_expected = len(track_sectors) or len(track_titles) or 1
+        total_sectors = sum(track_sectors)
         
         # Popen führt den Befehl im Hintergrund aus, blockiert Python aber nicht
         process = subprocess.Popen(rip_args, cwd=rip_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -141,13 +195,18 @@ def start_ripping(device_path: str):
                 process.kill()
                 raise subprocess.TimeoutExpired(process.args, settings["rip_timeout"])
             
-            # Zähle die bisher generierten WAV-Dateien im Ordner
-            current_wavs = len([f for f in os.listdir(rip_dir) if f.endswith(".wav")])
+            wav_files = sorted(f for f in os.listdir(rip_dir) if f.endswith(".wav"))
+            current_track = min(max(len(wav_files), 1), total_tracks_expected)
+            track_title = track_titles[current_track - 1] if current_track <= len(track_titles) else f"Track {current_track:02d}"
             
-            if total_tracks_expected > 0:
-                # Maximal auf 99% deckeln, die echten 100% kommen erst beim Konvertieren
-                prog = min(99, int((current_wavs / total_tracks_expected) * 100))
-                update_status("ripping", f"Rippe Track {current_wavs + 1} von {total_tracks_expected}...", artist, album, prog)
+            if total_sectors > 0:
+                written_sectors = sum(max(0, os.path.getsize(os.path.join(rip_dir, filename)) - 44) // 2352 for filename in wav_files)
+                prog = min(99, int((written_sectors / total_sectors) * 100))
+            else:
+                completed_tracks = max(0, len(wav_files) - 1)
+                prog = min(99, int((completed_tracks / total_tracks_expected) * 100))
+
+            update_status("ripping", f"Rippe Track {current_track} von {total_tracks_expected}: {track_title}", artist, album, prog)
             
             time.sleep(2) # Alle 2 Sekunden aktualisieren
         
@@ -221,10 +280,25 @@ def update_settings(new_settings: SettingsModel):
 
 @app.post("/trigger-rip")
 def trigger_rip(background_tasks: BackgroundTasks, device: str = "sr0"):
-    if current_status["state"] != "idle":
-        return {"message": "System ist beschäftigt"}
-    background_tasks.add_task(start_ripping, f"/dev/{device}")
+    with lock:
+        if current_status["state"] != "idle":
+            return {"message": "System ist beschäftigt"}
+        update_status("metadata", "Rip-Vorgang wird gestartet...", "", "", 0)
+        background_tasks.add_task(start_ripping, f"/dev/{device}")
     return {"message": "Rip getriggert"}
+
+@app.post("/eject")
+def eject_drive(device: str = "sr0"):
+    with lock:
+        if current_status["state"] != "idle":
+            raise HTTPException(status_code=409, detail="Auswerfen während eines laufenden Vorgangs nicht möglich")
+
+        try:
+            subprocess.run(["eject", f"/dev/{device}"], check=True, capture_output=True)
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise HTTPException(status_code=500, detail="Laufwerk konnte nicht ausgeworfen werden") from error
+
+    return {"message": "Laufwerk ausgeworfen"}
 
 # Frontend Mount (muss am Ende stehen!)
 os.makedirs("static", exist_ok=True)
