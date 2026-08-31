@@ -3,14 +3,14 @@ services:
     build: 
       context: ./backend
     container_name: riprobot_core
+    privileged: true             # NEU: Erlaubt dynamische Hardware-Erkennung (ersetzt devices)
     restart: unless-stopped
-    devices:
-      - "/dev/sr0:/dev/sr0"      # Reicht das CD-Laufwerk an den Container durch
     ports:
       - "8000:8000"              # Port für das FastAPI Web-Interface
     volumes:
       - ./backend:/app
       - /media:/media:rshared
+      - /dev:/dev                # NEU: Macht alle USB/CD-Geräte (auch nachträglich) sichtbar
     environment:
       - TZ=Europe/Berlin
       - PYTHONUNBUFFERED=1
