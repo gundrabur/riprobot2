@@ -185,7 +185,12 @@ def start_ripping(device_path: str):
                     new_path = os.path.join(rip_dir, f"{track_num:02d} - {clean_filename(tag_title)}.wav")
                     os.rename(os.path.join(rip_dir, filename), new_path)
 
-            update_status("success", "Vorgang erfolgreich abgeschlossen!", artist, album)
+            # --- NEU: Warten bis alles physisch auf dem USB-Stick ist ---
+            update_status("converting", "Speichere Daten final auf USB (Bitte warten)...", artist, album, 99)
+            os.sync() # Zwingt Linux, den Cache komplett auf den Stick zu leeren
+            # -------------------------------------------------------------
+
+            update_status("success", "Vorgang erfolgreich abgeschlossen!", artist, album, 100)
         else:
             update_status("error", "Fehler beim Rippen der CD.")
             
