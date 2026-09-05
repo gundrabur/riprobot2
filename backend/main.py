@@ -15,6 +15,8 @@ import discid
 import musicbrainzngs
 import re
 import socket
+import uuid
+import platform
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,9 +34,15 @@ app.add_middleware(
 )
 
 SETTINGS_FILE = "settings.json"
+HISTORY_FILE = "history.json"
+MAX_HISTORY_ENTRIES = 200
 BOOT_ID_FILE = "/proc/sys/kernel/random/boot_id"
 STARTUP_EJECT_MARKER = "/tmp/riprobot-startup-eject-boot-id"
+APP_VERSION = "2.0.0"
+APP_DEVELOPER = "Christian Möller"
+APP_COPYRIGHT_YEAR = 2026
 lock = threading.Lock()
+history_lock = threading.Lock()
 musicbrainzngs.set_useragent("RipRobot", "2.0", "AUDIO-RipRobot2@local.host")
 
 # Standard-Einstellungen
@@ -73,6 +81,25 @@ def save_settings(settings):
     with open(SETTINGS_FILE, "w") as f:
         json.dump(settings, f, indent=4)
 
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return []
+
+def save_history(history):
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+def add_history_entry(entry):
+    with history_lock:
+        history = load_history()
+        history.insert(0, entry) # neueste zuerst
+        save_history(history[:MAX_HISTORY_ENTRIES])
+
 class SettingsModel(BaseModel):
     format: str
     output_path: str
@@ -109,6 +136,57 @@ def get_ram_rip_dir():
     except OSError:
         pass
     return None # Kein/zu wenig RAM verfügbar -> Fallback: direkt auf das Zielverzeichnis rippen
+
+def get_hardware_model():
+    try:
+        with open("/proc/device-tree/model", "r") as f:
+            return f.read().strip("\x00").strip()
+    except OSError:
+        pass
+    try:
+        with open("/proc/cpuinfo", "r") as f:
+            for line in f:
+                if line.startswith("Model"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.machine() or None
+
+def get_ram_info():
+    try:
+        meminfo = {}
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    meminfo[parts[0].strip()] = int(parts[1].strip().split()[0]) # kB
+        return {
+            "total_mb": round(meminfo.get("MemTotal", 0) / 1024, 1),
+            "available_mb": round(meminfo.get("MemAvailable", 0) / 1024, 1),
+        }
+    except (OSError, ValueError, IndexError):
+        return {"total_mb": None, "available_mb": None}
+
+def get_optical_drive_info(device_path):
+    device_name = os.path.basename(device_path)
+    info = {"device": device_path, "present": os.path.exists(device_path), "model": None}
+    try:
+        with open(f"/sys/block/{device_name}/device/model", "r") as f:
+            info["model"] = f.read().strip()
+    except OSError:
+        pass
+    return info
+
+def get_usb_stick_info(output_path):
+    info = {"path": output_path, "mounted": False, "total_gb": None, "free_gb": None}
+    try:
+        info["mounted"] = os.path.ismount(output_path)
+        usage = shutil.disk_usage(output_path)
+        info["total_gb"] = round(usage.total / (1024 ** 3), 1)
+        info["free_gb"] = round(usage.free / (1024 ** 3), 1)
+    except OSError:
+        pass
+    return info
 
 def get_boot_id():
     try:
@@ -202,7 +280,23 @@ def start_ripping(device_path: str):
     # Erst nach RAM rippen (siehe get_ram_rip_dir), sonst direkt auf den Stick als Fallback
     ram_dir = get_ram_rip_dir()
     rip_dir = ram_dir or final_dir
-    
+    session_start = time.time()
+    total_files = 0
+
+    def record_history(status, message_key):
+        add_history_entry({
+            "id": uuid.uuid4().hex,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "artist": artist,
+            "album": album,
+            "format": settings["format"],
+            "status": status,
+            "message_key": message_key,
+            "track_count": total_files or total_tracks_expected,
+            "duration_sec": round(time.time() - session_start, 1),
+            "speed_history": current_status.get("speed_history", []),
+        })
+
     try:
         # Ripping Parameter basierend auf Settings
         rip_args = ["cdparanoia", "-d", device_path, "-B"]
@@ -300,13 +394,17 @@ def start_ripping(device_path: str):
             # -------------------------------------------------------------
 
             update_status("success", "Vorgang erfolgreich abgeschlossen!", artist, album, 100, "status.success")
+            record_history("success", "status.success")
         else:
             update_status("error", "Fehler beim Rippen der CD.", message_key="status.ripError")
+            record_history("error", "status.ripError")
             
     except subprocess.TimeoutExpired:
         update_status("error", "Timeout! CD konnte nicht gelesen werden.", message_key="status.timeout")
+        record_history("error", "status.timeout")
     except Exception as e:
         update_status("error", f"Unerwarteter Fehler: {e}", message_key="status.unexpectedError", message_params={"error": str(e)})
+        record_history("error", "status.unexpectedError")
         
     finally:
         if ram_dir:
@@ -321,6 +419,20 @@ def start_ripping(device_path: str):
 def get_status():
     return {**current_status, "speed_chart_enabled": load_settings().get("enable_speed_chart", False)}
 
+@app.get("/api/system-info")
+def get_system_info():
+    settings = load_settings()
+    return {
+        "version": APP_VERSION,
+        "developer": APP_DEVELOPER,
+        "copyright_year": APP_COPYRIGHT_YEAR,
+        "os": platform.platform(),
+        "hardware_model": get_hardware_model(),
+        "ram": get_ram_info(),
+        "optical_drive": get_optical_drive_info("/dev/sr0"),
+        "usb_stick": get_usb_stick_info(settings["output_path"]),
+    }
+
 @app.get("/api/settings")
 def get_settings():
     return load_settings()
@@ -329,6 +441,26 @@ def get_settings():
 def update_settings(new_settings: SettingsModel):
     save_settings(new_settings.model_dump())
     return {"message": "Settings gespeichert"}
+
+@app.get("/api/history")
+def get_history():
+    return load_history()
+
+@app.delete("/api/history/{entry_id}")
+def delete_history_entry(entry_id: str):
+    with history_lock:
+        history = load_history()
+        filtered = [entry for entry in history if entry.get("id") != entry_id]
+        if len(filtered) == len(history):
+            raise HTTPException(status_code=404, detail="Eintrag nicht gefunden")
+        save_history(filtered)
+    return {"message": "Eintrag gelöscht"}
+
+@app.delete("/api/history")
+def clear_history():
+    with history_lock:
+        save_history([])
+    return {"message": "Verlauf geleert"}
 
 @app.post("/trigger-rip")
 def trigger_rip(background_tasks: BackgroundTasks, device: str = "sr0"):

@@ -33,16 +33,43 @@
                 <p class="text-sm text-gray-400 mt-1" data-i18n="app.subtitle">Autonome CD-Ripping-Station</p>
             </div>
             <div class="flex flex-col sm:items-end gap-2 w-full sm:w-auto">
-                <div class="grid grid-cols-2 gap-2 w-full sm:w-auto bg-gray-900 p-1 rounded-lg border border-gray-800">
+                <div class="grid grid-cols-3 gap-2 w-full sm:w-auto bg-gray-900 p-1 rounded-lg border border-gray-800">
                     <button onclick="switchTab('dashboard')" id="btn-dashboard" class="px-3 sm:px-4 py-2 rounded-md bg-gray-800 text-white font-medium shadow-sm transition" data-i18n="nav.dashboard">Dashboard</button>
+                    <button onclick="switchTab('history')" id="btn-history" class="px-3 sm:px-4 py-2 rounded-md text-gray-400 hover:text-white font-medium transition" data-i18n="nav.history">Verlauf</button>
                     <button onclick="switchTab('settings')" id="btn-settings" class="px-3 sm:px-4 py-2 rounded-md text-gray-400 hover:text-white font-medium transition" data-i18n="nav.settings">Einstellungen</button>
                 </div>
-                <div class="flex rounded-md border border-gray-800 overflow-hidden" role="group" aria-label="Sprache" data-i18n-aria-label="language.label">
-                    <button type="button" id="lang-de" onclick="setLanguage('de')" class="px-3 py-1 text-xs font-semibold transition">DE</button>
-                    <button type="button" id="lang-en" onclick="setLanguage('en')" class="px-3 py-1 text-xs font-semibold transition">EN</button>
+                <div class="flex items-center gap-2">
+                    <div class="flex rounded-md border border-gray-800 overflow-hidden" role="group" aria-label="Sprache" data-i18n-aria-label="language.label">
+                        <button type="button" id="lang-de" onclick="setLanguage('de')" class="px-3 py-1 text-xs font-semibold transition">DE</button>
+                        <button type="button" id="lang-en" onclick="setLanguage('en')" class="px-3 py-1 text-xs font-semibold transition">EN</button>
+                    </div>
+                    <button type="button" id="info-button" onclick="openInfoModal()" title="Info" data-i18n-title="nav.info" class="w-7 h-7 flex items-center justify-center rounded-full border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition text-sm font-semibold">i</button>
                 </div>
             </div>
         </header>
+
+        <!-- INFO MODAL -->
+        <div id="info-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onclick="if (event.target === this) closeInfoModal()">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl shadow-lg max-w-md w-full p-6 space-y-4">
+                <div class="flex justify-between items-start">
+                    <h2 class="text-xl font-bold text-white" data-i18n="info.title">Über RipRobot2</h2>
+                    <button onclick="closeInfoModal()" class="text-gray-400 hover:text-white transition text-xl leading-none">&times;</button>
+                </div>
+                <div class="text-sm space-y-1">
+                    <p class="text-gray-300"><span class="text-gray-500" data-i18n="info.version">Version</span>: <span id="info-version">-</span></p>
+                    <p class="text-gray-300"><span class="text-gray-500" data-i18n="info.developer">Entwickler</span>: <span id="info-developer">-</span></p>
+                    <p class="text-gray-300"><span class="text-gray-500" data-i18n="info.copyright">Copyright</span>: <span id="info-copyright">-</span></p>
+                </div>
+                <div class="border-t border-gray-800 pt-4 space-y-1">
+                    <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2" data-i18n="info.debugTitle">Debug-Informationen</h3>
+                    <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.system">System</span>: <span id="info-os">-</span></p>
+                    <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.hardware">Hardware</span>: <span id="info-hardware">-</span></p>
+                    <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.ram">RAM</span>: <span id="info-ram">-</span></p>
+                    <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.opticalDrive">Optisches Laufwerk</span>: <span id="info-optical">-</span></p>
+                    <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.usbStick">USB-Stick</span>: <span id="info-usb">-</span></p>
+                </div>
+            </div>
+        </div>
 
         <!-- DASHBOARD TAB -->
         <div id="tab-dashboard" class="block space-y-6">
@@ -57,7 +84,10 @@
                               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-gray-500 opacity-75"></span>
                               <span class="relative inline-flex rounded-full h-4 w-4 bg-gray-500"></span>
                             </span>
-                            <span id="status-text" class="min-w-0 text-xl sm:text-2xl font-bold text-white break-words" data-i18n="status.waiting">Warte auf System...</span>
+                            <div class="min-w-0">
+                                <span id="status-text" class="block min-w-0 text-xl sm:text-2xl font-bold text-white break-words" data-i18n="status.waiting">Warte auf System...</span>
+                                <span id="status-subtitle" class="block text-md text-gray-400 break-words"></span>
+                            </div>
                         </div>
                     </div>
                     <div class="min-w-0 text-left md:text-right">
@@ -100,6 +130,16 @@
                     <span data-i18n="actions.manualRip">Rip manuell starten</span>
                 </button>
             </div>
+        </div>
+
+        <!-- VERLAUF TAB -->
+        <div id="tab-history" class="hidden space-y-4">
+            <div class="flex justify-between items-center">
+                <h2 class="text-xl font-bold text-white" data-i18n="history.title">Rip-Verlauf</h2>
+                <button onclick="clearHistory()" class="bg-red-900/40 hover:bg-red-900/70 border border-red-800 text-red-300 px-4 py-2 rounded-lg text-sm font-medium transition" data-i18n="history.deleteAll">Gesamten Verlauf löschen</button>
+            </div>
+            <p id="history-empty" class="hidden text-gray-500 text-sm" data-i18n="history.empty">Noch keine Rip-Vorgänge aufgezeichnet.</p>
+            <div id="history-list" class="space-y-3"></div>
         </div>
 
         <!-- SETTINGS TAB -->
@@ -173,7 +213,25 @@
                 "language.label": "Sprache",
                 "app.subtitle": "Autonome CD-Ripping-Station",
                 "nav.dashboard": "Dashboard",
+                "nav.history": "Verlauf",
                 "nav.settings": "Einstellungen",
+                "nav.info": "Info",
+                "info.title": "Über RipRobot2",
+                "info.version": "Version",
+                "info.developer": "Entwickler",
+                "info.copyright": "Copyright",
+                "info.debugTitle": "Debug-Informationen",
+                "info.system": "System",
+                "info.hardware": "Hardware",
+                "info.ram": "RAM",
+                "info.opticalDrive": "Optisches Laufwerk",
+                "info.usbStick": "USB-Stick",
+                "info.ramFormat": "{available} MB frei von {total} MB",
+                "info.usbFormat": "{path} ({free} GB frei von {total} GB)",
+                "info.usbNotMounted": "{path} (nicht eingehängt)",
+                "info.driveNotFound": "Kein Laufwerk erkannt ({device})",
+                "info.unknown": "Unbekannt",
+                "error.loadInfo": "Debug-Informationen konnten nicht geladen werden.",
                 "dashboard.currentStatus": "Aktueller Status",
                 "dashboard.detectedMedia": "Erkanntes Medium",
                 "dashboard.progress": "Fortschritt",
@@ -190,6 +248,22 @@
                 "settings.ripTimeout": "Rip-Abbruch nach (Sek.)",
                 "settings.enableSpeedChart": "Live-Diagramm der Lesegeschwindigkeit anzeigen",
                 "settings.saved": "Einstellungen gespeichert!",
+                "history.title": "Rip-Verlauf",
+                "history.deleteAll": "Gesamten Verlauf löschen",
+                "history.deleteAllConfirm": "Gesamten Rip-Verlauf unwiderruflich löschen?",
+                "history.deleteEntryConfirm": "Diesen Eintrag unwiderruflich löschen?",
+                "history.empty": "Noch keine Rip-Vorgänge aufgezeichnet.",
+                "history.delete": "Löschen",
+                "history.showChart": "Diagramm anzeigen",
+                "history.hideChart": "Diagramm ausblenden",
+                "history.tracks": "Tracks",
+                "history.duration": "Dauer",
+                "history.noChartData": "Für diesen Vorgang wurden keine Geschwindigkeitsdaten aufgezeichnet.",
+                "history.status.success": "Erfolgreich",
+                "history.status.error": "Fehler",
+                "error.loadHistory": "Verlauf konnte nicht geladen werden.",
+                "error.deleteHistory": "Eintrag konnte nicht gelöscht werden.",
+                "error.clearHistory": "Verlauf konnte nicht geleert werden.",
                 "format.flac": "FLAC (verlustfrei, getaggt)",
                 "format.mp3": "MP3 (V0-Qualität, getaggt)",
                 "format.wav": "WAV (Rohdaten, keine Tags)",
@@ -203,7 +277,7 @@
                 "status.outputMissing": "Zielverzeichnis {path} nicht gefunden!",
                 "status.searchingMetadata": "Suche Metadaten auf MusicBrainz...",
                 "status.startingRip": "Starte Rip-Vorgang...",
-                "status.rippingTrack": "Rippe Track {current} von {total}: {title}",
+                "status.rippingTrack": "Rippe Track {current} von {total}:\n{title}",
                 "status.convertingFiles": "Konvertiere {count} Dateien in {format}...",
                 "status.converting": "Konvertiere in {format}...",
                 "status.syncingUsb": "Speichere Daten final auf USB (bitte warten)...",
@@ -226,7 +300,25 @@
                 "language.label": "Language",
                 "app.subtitle": "Headless CD ripping station",
                 "nav.dashboard": "Dashboard",
+                "nav.history": "History",
                 "nav.settings": "Settings",
+                "nav.info": "Info",
+                "info.title": "About RipRobot2",
+                "info.version": "Version",
+                "info.developer": "Developer",
+                "info.copyright": "Copyright",
+                "info.debugTitle": "Debug information",
+                "info.system": "System",
+                "info.hardware": "Hardware",
+                "info.ram": "RAM",
+                "info.opticalDrive": "Optical drive",
+                "info.usbStick": "USB drive",
+                "info.ramFormat": "{available} MB free of {total} MB",
+                "info.usbFormat": "{path} ({free} GB free of {total} GB)",
+                "info.usbNotMounted": "{path} (not mounted)",
+                "info.driveNotFound": "No drive detected ({device})",
+                "info.unknown": "Unknown",
+                "error.loadInfo": "Debug information could not be loaded.",
                 "dashboard.currentStatus": "Current status",
                 "dashboard.detectedMedia": "Detected media",
                 "dashboard.progress": "Progress",
@@ -243,6 +335,22 @@
                 "settings.ripTimeout": "Abort rip after (sec.)",
                 "settings.enableSpeedChart": "Show live read-speed chart",
                 "settings.saved": "Settings saved!",
+                "history.title": "Rip history",
+                "history.deleteAll": "Delete entire history",
+                "history.deleteAllConfirm": "Permanently delete the entire rip history?",
+                "history.deleteEntryConfirm": "Permanently delete this entry?",
+                "history.empty": "No rip operations recorded yet.",
+                "history.delete": "Delete",
+                "history.showChart": "Show chart",
+                "history.hideChart": "Hide chart",
+                "history.tracks": "Tracks",
+                "history.duration": "Duration",
+                "history.noChartData": "No speed data was recorded for this run.",
+                "history.status.success": "Success",
+                "history.status.error": "Error",
+                "error.loadHistory": "History could not be loaded.",
+                "error.deleteHistory": "Entry could not be deleted.",
+                "error.clearHistory": "History could not be cleared.",
                 "format.flac": "FLAC (lossless, tagged)",
                 "format.mp3": "MP3 (V0 quality, tagged)",
                 "format.wav": "WAV (raw audio, no tags)",
@@ -256,7 +364,7 @@
                 "status.outputMissing": "Destination folder {path} was not found!",
                 "status.searchingMetadata": "Searching MusicBrainz for metadata...",
                 "status.startingRip": "Starting rip...",
-                "status.rippingTrack": "Ripping track {current} of {total}: {title}",
+                "status.rippingTrack": "Ripping track {current} of {total}:\n{title}",
                 "status.convertingFiles": "Converting {count} files to {format}...",
                 "status.converting": "Converting to {format}...",
                 "status.syncingUsb": "Finishing data transfer to USB (please wait)...",
@@ -335,9 +443,12 @@
 
         function renderStatus(data) {
             latestStatus = data;
-            document.getElementById('status-text').innerText = data.message_key
+            const fullText = data.message_key
                 ? translate(data.message_key, data.message_params)
                 : data.message;
+            const [mainLine, ...subtitleLines] = fullText.split('\n');
+            document.getElementById('status-text').textContent = mainLine;
+            document.getElementById('status-subtitle').textContent = subtitleLines.join('\n');
             document.getElementById('track-artist').innerText = data.artist === 'Unknown Artist'
                 ? translate('metadata.unknownArtist')
                 : data.artist || "-";
@@ -369,6 +480,7 @@
             });
 
             if (latestStatus) renderStatus(latestStatus);
+            if (historyEntries.length) renderHistoryList();
         }
 
         function setLanguage(language) {
@@ -380,15 +492,18 @@
         // --- Tab Navigation ---
         function switchTab(tab) {
             document.getElementById('tab-dashboard').classList.add('hidden');
+            document.getElementById('tab-history').classList.add('hidden');
             document.getElementById('tab-settings').classList.add('hidden');
             
             document.getElementById('btn-dashboard').className = "px-4 py-2 rounded-md text-gray-400 hover:text-white font-medium transition";
+            document.getElementById('btn-history').className = "px-4 py-2 rounded-md text-gray-400 hover:text-white font-medium transition";
             document.getElementById('btn-settings').className = "px-4 py-2 rounded-md text-gray-400 hover:text-white font-medium transition";
             
             document.getElementById(`tab-${tab}`).classList.remove('hidden');
             document.getElementById(`btn-${tab}`).className = "px-4 py-2 rounded-md bg-gray-800 text-white font-medium shadow-sm transition";
             
             if(tab === 'settings') loadSettings();
+            if(tab === 'history') loadHistory();
         }
 
         // --- Status Polling ---
@@ -475,6 +590,133 @@
                 alert(translate('error.saveSettings'));
             }
         }
+
+        // --- Verlauf ---
+        let historyEntries = [];
+        const historyCharts = {};
+
+        function formatDuration(seconds) {
+            const totalSeconds = Math.round(seconds || 0);
+            const minutes = Math.floor(totalSeconds / 60);
+            const secs = totalSeconds % 60;
+            return `${minutes}:${String(secs).padStart(2, '0')}`;
+        }
+
+        function renderHistoryList() {
+            const container = document.getElementById('history-list');
+            const emptyMsg = document.getElementById('history-empty');
+            container.innerHTML = '';
+
+            if (historyEntries.length === 0) {
+                emptyMsg.classList.remove('hidden');
+                return;
+            }
+            emptyMsg.classList.add('hidden');
+
+            historyEntries.forEach(entry => {
+                const isSuccess = entry.status === 'success';
+                const hasChartData = Array.isArray(entry.speed_history) && entry.speed_history.length > 0;
+
+                const card = document.createElement('div');
+                card.className = 'bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-lg';
+                card.innerHTML = `
+                    <div class="flex flex-wrap justify-between items-start gap-3">
+                        <div class="min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="w-2.5 h-2.5 rounded-full ${isSuccess ? 'bg-green-500' : 'bg-red-500'}"></span>
+                                <p class="text-lg font-semibold text-white break-words">${entry.artist || '-'} - ${entry.album || '-'}</p>
+                            </div>
+                            <p class="text-sm text-gray-500 mt-1">${entry.timestamp} · ${entry.format || '-'} · ${translate(isSuccess ? 'history.status.success' : 'history.status.error')}</p>
+                            <p class="text-sm text-gray-400 mt-1">${translate('history.tracks')}: ${entry.track_count ?? '-'} · ${translate('history.duration')}: ${formatDuration(entry.duration_sec)}</p>
+                        </div>
+                        <div class="flex gap-2 shrink-0">
+                            <button data-action="toggle" class="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-medium transition">${translate('history.showChart')}</button>
+                            <button data-action="delete" class="bg-red-900/40 hover:bg-red-900/70 border border-red-800 text-red-300 px-3 py-1.5 rounded-lg text-xs font-medium transition">${translate('history.delete')}</button>
+                        </div>
+                    </div>
+                    <div data-role="chart-wrap" class="hidden mt-4">
+                        ${hasChartData
+                            ? `<div class="h-48"><canvas data-role="chart"></canvas></div>`
+                            : `<p class="text-sm text-gray-500">${translate('history.noChartData')}</p>`}
+                    </div>
+                `;
+
+                const toggleBtn = card.querySelector('[data-action="toggle"]');
+                const chartWrap = card.querySelector('[data-role="chart-wrap"]');
+                toggleBtn.addEventListener('click', () => {
+                    const hidden = chartWrap.classList.toggle('hidden');
+                    toggleBtn.textContent = translate(hidden ? 'history.showChart' : 'history.hideChart');
+                    if (!hidden && hasChartData) renderHistoryChart(entry, card.querySelector('[data-role="chart"]'));
+                });
+                card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteHistoryEntry(entry.id));
+
+                container.appendChild(card);
+            });
+        }
+
+        function renderHistoryChart(entry, canvas) {
+            if (historyCharts[entry.id]) {
+                historyCharts[entry.id].destroy();
+            }
+            historyCharts[entry.id] = new Chart(canvas.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: entry.speed_history.map(sample => sample.t),
+                    datasets: [{
+                        label: 'MB/s',
+                        data: entry.speed_history.map(sample => sample.mbps),
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                        fill: true,
+                        tension: 0.35,
+                        pointRadius: 0,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    scales: {
+                        x: { ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' }, title: { display: true, text: 's', color: '#9ca3af' } },
+                        y: { beginAtZero: true, ticks: { color: '#9ca3af' }, grid: { color: '#1f2937' }, title: { display: true, text: 'MB/s', color: '#9ca3af' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/history');
+                historyEntries = await res.json();
+                Object.values(historyCharts).forEach(chart => chart.destroy());
+                Object.keys(historyCharts).forEach(key => delete historyCharts[key]);
+                renderHistoryList();
+            } catch (e) {
+                console.error(translate('error.loadHistory'));
+            }
+        }
+
+        async function deleteHistoryEntry(id) {
+            if (!confirm(translate('history.deleteEntryConfirm'))) return;
+            try {
+                await fetch(`/api/history/${id}`, { method: 'DELETE' });
+                loadHistory();
+            } catch (e) {
+                alert(translate('error.deleteHistory'));
+            }
+        }
+
+        async function clearHistory() {
+            if (!confirm(translate('history.deleteAllConfirm'))) return;
+            try {
+                await fetch('/api/history', { method: 'DELETE' });
+                loadHistory();
+            } catch (e) {
+                alert(translate('error.clearHistory'));
+            }
+        }
         
         async function triggerRip() {
             try {
@@ -498,6 +740,50 @@
             } finally {
                 fetchStatus();
             }
+        }
+
+        // --- Info-Modal ---
+        async function openInfoModal() {
+            document.getElementById('info-modal').classList.remove('hidden');
+            document.getElementById('info-version').textContent = '-';
+            document.getElementById('info-developer').textContent = '-';
+            document.getElementById('info-copyright').textContent = '-';
+            document.getElementById('info-os').textContent = '-';
+            document.getElementById('info-hardware').textContent = '-';
+            document.getElementById('info-ram').textContent = '-';
+            document.getElementById('info-optical').textContent = '-';
+            document.getElementById('info-usb').textContent = '-';
+
+            try {
+                const res = await fetch('/api/system-info');
+                const data = await res.json();
+
+                document.getElementById('info-version').textContent = data.version || translate('info.unknown');
+                document.getElementById('info-developer').textContent = data.developer || translate('info.unknown');
+                document.getElementById('info-copyright').textContent = `\u00a9 ${data.copyright_year || '-'} ${data.developer || ''}`.trim();
+                document.getElementById('info-os').textContent = data.os || translate('info.unknown');
+                document.getElementById('info-hardware').textContent = data.hardware_model || translate('info.unknown');
+
+                document.getElementById('info-ram').textContent = (data.ram && data.ram.total_mb)
+                    ? translate('info.ramFormat', { available: data.ram.available_mb, total: data.ram.total_mb })
+                    : translate('info.unknown');
+
+                const drive = data.optical_drive || {};
+                document.getElementById('info-optical').textContent = drive.present
+                    ? `${drive.model || translate('info.unknown')} (${drive.device})`
+                    : translate('info.driveNotFound', { device: drive.device || '-' });
+
+                const usb = data.usb_stick || {};
+                document.getElementById('info-usb').textContent = usb.mounted
+                    ? translate('info.usbFormat', { path: usb.path, free: usb.free_gb, total: usb.total_gb })
+                    : translate('info.usbNotMounted', { path: usb.path || '-' });
+            } catch (e) {
+                console.error(translate('error.loadInfo'));
+            }
+        }
+
+        function closeInfoModal() {
+            document.getElementById('info-modal').classList.add('hidden');
         }
 
         // Start: Status jede Sekunde abrufen
