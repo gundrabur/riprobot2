@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import subprocess
 import tempfile
+import shutil
 import time
 import os
 import json
@@ -42,7 +43,8 @@ default_settings = {
     "output_path": "/media/usb",
     "paranoia_mode": "safe",    # safe (-B), fast (-B -Y), disable (-B -Z)
     "network_timeout": 60,
-    "rip_timeout": 3600
+    "rip_timeout": 3600,
+    "enable_speed_chart": False # Live-Diagramm der Lesegeschwindigkeit
 }
 
 # Live-Status für das Web-Interface
@@ -53,7 +55,9 @@ current_status = {
     "message_params": {},
     "artist": "",
     "album": "",
-    "progress": 0
+    "progress": 0,
+    "speed_mbps": 0,
+    "speed_history": [] # Liste von {"t": Sekunden, "mbps": Wert} fuer das Live-Diagramm
 }
 
 def load_settings():
@@ -75,6 +79,7 @@ class SettingsModel(BaseModel):
     paranoia_mode: str
     network_timeout: int
     rip_timeout: int
+    enable_speed_chart: bool = False
 
 def update_status(state, message, artist=None, album=None, progress=0, message_key=None, message_params=None):
     global current_status
@@ -85,10 +90,25 @@ def update_status(state, message, artist=None, album=None, progress=0, message_k
     if artist is not None: current_status["artist"] = artist
     if album is not None: current_status["album"] = album
     current_status["progress"] = max(0, min(100, progress))
+    if state == "idle":
+        current_status["speed_mbps"] = 0
+        current_status["speed_history"] = []
     print(f"[{state.upper()}] {message}")
 
 def clean_filename(name):
     return re.sub(r'[\\/*?:"<>|]', "", name).strip()
+
+# cdparanoia liest per SCSI-Passthrough (ioctl), das umgeht die /sys/block-Iostat-Zähler.
+# Daher wird zunächst nach RAM (tmpfs) gerippt: Schreiben dorthin ist quasi verzögerungsfrei,
+# wodurch das Dateiwachstum dort ausschließlich die Laufwerks-Lesegeschwindigkeit widerspiegelt.
+def get_ram_rip_dir():
+    shm = "/dev/shm"
+    try:
+        if os.path.isdir(shm) and shutil.disk_usage(shm).free > 900 * 1024 * 1024:
+            return tempfile.mkdtemp(prefix="riprobot_", dir=shm)
+    except OSError:
+        pass
+    return None # Kein/zu wenig RAM verfügbar -> Fallback: direkt auf das Zielverzeichnis rippen
 
 def get_boot_id():
     try:
@@ -172,12 +192,16 @@ def start_ripping(device_path: str):
     update_status("ripping", "Starte Rip-Vorgang...", artist, album, message_key="status.startingRip")
 
     folder_name = f"{clean_filename(artist)} - {clean_filename(album)}" if artist != "Unknown Artist" else f"rip_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-    rip_dir = os.path.join(settings["output_path"], folder_name)
+    final_dir = os.path.join(settings["output_path"], folder_name)
     
-    if os.path.exists(rip_dir):
-        rip_dir += f"_{datetime.now().strftime('%H%M%S')}"
+    if os.path.exists(final_dir):
+        final_dir += f"_{datetime.now().strftime('%H%M%S')}"
         
-    os.makedirs(rip_dir, exist_ok=True)
+    os.makedirs(final_dir, exist_ok=True)
+
+    # Erst nach RAM rippen (siehe get_ram_rip_dir), sonst direkt auf den Stick als Fallback
+    ram_dir = get_ram_rip_dir()
+    rip_dir = ram_dir or final_dir
     
     try:
         # Ripping Parameter basierend auf Settings
@@ -191,6 +215,12 @@ def start_ripping(device_path: str):
         # Popen führt den Befehl im Hintergrund aus, blockiert Python aber nicht
         process = subprocess.Popen(rip_args, cwd=rip_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
+        speed_chart_enabled = settings.get("enable_speed_chart", False)
+        current_status["speed_mbps"] = 0
+        current_status["speed_history"] = []
+        last_bytes = 0
+        last_sample_time = time.time()
+
         start_time = time.time()
         # Schleife läuft, solange cdparanoia noch arbeitet (poll() ist None)
         while process.poll() is None:
@@ -209,6 +239,18 @@ def start_ripping(device_path: str):
             else:
                 completed_tracks = max(0, len(wav_files) - 1)
                 prog = min(99, int((completed_tracks / total_tracks_expected) * 100))
+
+            if speed_chart_enabled:
+                total_bytes = sum(os.path.getsize(os.path.join(rip_dir, filename)) for filename in wav_files)
+                now = time.time()
+                elapsed = now - last_sample_time
+                if elapsed > 0:
+                    mbps = max(0, (total_bytes - last_bytes) / elapsed) / (1024 * 1024)
+                    current_status["speed_mbps"] = round(mbps, 2)
+                    current_status["speed_history"].append({"t": round(now - start_time, 1), "mbps": round(mbps, 2)})
+                    current_status["speed_history"] = current_status["speed_history"][-150:] # Historie begrenzen
+                last_bytes = total_bytes
+                last_sample_time = now
 
             update_status("ripping", f"Rippe Track {current_track} von {total_tracks_expected}: {track_title}", artist, album, prog, "status.rippingTrack", {"current": current_track, "total": total_tracks_expected, "title": track_title})
             
@@ -248,8 +290,12 @@ def start_ripping(device_path: str):
                     new_path = os.path.join(rip_dir, f"{track_num:02d} - {clean_filename(tag_title)}.wav")
                     os.rename(os.path.join(rip_dir, filename), new_path)
 
-            # --- NEU: Warten bis alles physisch auf dem USB-Stick ist ---
+            # --- Fertige Dateien vom RAM-Zwischenspeicher auf den USB-Stick verschieben ---
             update_status("converting", "Speichere Daten final auf USB (Bitte warten)...", artist, album, 99, "status.syncingUsb")
+            if ram_dir:
+                for filename in os.listdir(ram_dir):
+                    shutil.move(os.path.join(ram_dir, filename), os.path.join(final_dir, filename))
+            
             os.sync() # Zwingt Linux, den Cache komplett auf den Stick zu leeren
             # -------------------------------------------------------------
 
@@ -263,6 +309,8 @@ def start_ripping(device_path: str):
         update_status("error", f"Unerwarteter Fehler: {e}", message_key="status.unexpectedError", message_params={"error": str(e)})
         
     finally:
+        if ram_dir:
+            shutil.rmtree(ram_dir, ignore_errors=True) # RAM immer freigeben, auch bei Fehlern/Timeout
         subprocess.run(["eject", device_path])
         # Reset status after 10 seconds
         threading.Timer(10.0, lambda: update_status("idle", "Bereit. Lege eine CD ein.", "", "", 0, "status.ready")).start()
@@ -271,7 +319,7 @@ def start_ripping(device_path: str):
 
 @app.get("/api/status")
 def get_status():
-    return current_status
+    return {**current_status, "speed_chart_enabled": load_settings().get("enable_speed_chart", False)}
 
 @app.get("/api/settings")
 def get_settings():
@@ -304,6 +352,13 @@ def eject_drive(device: str = "sr0"):
 
     return {"message": "Laufwerk ausgeworfen"}
 
+class NoCacheStaticFiles(StaticFiles):
+    """Verhindert Browser-Caching, damit Frontend-Updates sofort ohne Hard-Refresh sichtbar sind."""
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return response
+
 # Frontend Mount (muss am Ende stehen!)
 os.makedirs("static", exist_ok=True)
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/", NoCacheStaticFiles(directory="static", html=True), name="static")
