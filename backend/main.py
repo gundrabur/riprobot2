@@ -17,6 +17,7 @@ import re
 import socket
 import uuid
 import platform
+import atexit
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -68,6 +69,276 @@ current_status = {
     "speed_history": [] # Liste von {"t": Sekunden, "mbps": Wert} fuer das Live-Diagramm
 }
 
+# --- Onboard-LED für Blink-Codes ---
+# Wird nur genutzt, wenn Linux eine steuerbare LED unter /sys/class/leds meldet. Erkennt automatisch:
+#  1) "multicolor"-Klasse (ein Verzeichnis mit multi_intensity/multi_index) - z.B. RGB-Tastatur-LEDs
+#     wie die Power-Taste des Pi 500+ (KTD202x-artiger Treiber). Nicht an echter Hardware verifiziert,
+#     das Debug-Panel zeigt den erkannten Modus/Pfad zur Kontrolle an.
+#  2) getrennte rot/grün/blau-LED-Geräte (Name enthält "red"/"green"/"blue")
+#  3) einfache einfarbige LED (ACT/PWR/led0/led1 oder irgendein Gerät mit "brightness")
+# Ist nichts davon vorhanden (z.B. Pi 400/500 ohne Sichtfenster, oder kein Zugriff), bleibt alles ein No-Op.
+MONO_LED_NAME_CANDIDATES = ["ACT", "PWR", "led0", "led1"]
+COLOR_CHANNEL_MAP = {"red": ("red",), "green": ("green",), "blue": ("blue",), "yellow": ("red", "green")}
+
+# Werte je Status: mono = einfache Blink-Pause-Liste (None = aus); color/pattern = Farbe + Blink-Pause-Liste
+# (pattern None = dauerhaft an) für RGB/Multicolor-LEDs.
+LED_PATTERNS = {
+    "idle":       {"mono": None,                                        "color": "green", "pattern": None},
+    "metadata":   {"mono": [(0.1, 0.1)],                                 "color": "blue",  "pattern": [(0.1, 0.1)]},
+    "ripping":    {"mono": [(0.5, 0.5)],                                 "color": "blue",  "pattern": [(0.5, 0.5)]},
+    "converting": {"mono": [(0.2, 0.2)],                                 "color": "blue",  "pattern": [(0.2, 0.2)]},
+    "success":    {"mono": [(1.0, 1.0)],                                 "color": "green", "pattern": [(1.0, 1.0)]},
+    "error":      {"mono": [(0.1, 0.1), (0.1, 0.1), (0.1, 0.8)],         "color": "red",   "pattern": [(0.1, 0.1), (0.1, 0.1), (0.1, 0.8)]},
+}
+
+def find_multicolor_led(base_dir="/sys/class/leds"):
+    try:
+        entries = os.listdir(base_dir)
+    except OSError:
+        return None
+    for name in entries:
+        path = os.path.join(base_dir, name)
+        if os.path.exists(os.path.join(path, "multi_intensity")) and os.path.exists(os.path.join(path, "multi_index")):
+            try:
+                with open(os.path.join(path, "multi_index"), "r") as f:
+                    channels = f.read().split()
+                with open(os.path.join(path, "max_brightness"), "r") as f:
+                    max_brightness = int(f.read().strip())
+                return {"path": path, "channels": channels, "max_brightness": max_brightness}
+            except (OSError, ValueError):
+                continue
+    return None
+
+def find_rgb_led_triplet(base_dir="/sys/class/leds"):
+    try:
+        entries = os.listdir(base_dir)
+    except OSError:
+        return None
+    channels = {}
+    for name in entries:
+        path = os.path.join(base_dir, name)
+        if not os.path.exists(os.path.join(path, "brightness")):
+            continue
+        lower = name.lower()
+        for color in ("red", "green", "blue"):
+            if color in lower:
+                channels[color] = path
+    return channels if "red" in channels and "green" in channels else None
+
+def find_mono_led(base_dir="/sys/class/leds"):
+    for name in MONO_LED_NAME_CANDIDATES:
+        path = os.path.join(base_dir, name)
+        if os.path.exists(os.path.join(path, "brightness")):
+            return path
+    try:
+        for name in os.listdir(base_dir):
+            path = os.path.join(base_dir, name)
+            if os.path.exists(os.path.join(path, "brightness")):
+                return path
+    except OSError:
+        pass
+    return None
+
+class LedController:
+    def __init__(self):
+        self.mode = None # "multicolor", "rgb" oder "mono"
+        self.rgb_channels = None    # {farbe: pfad} bei Modus "rgb"
+        self.multicolor = None      # {path, channels, max_brightness} bei Modus "multicolor"
+        self.mono_path = None
+        self.available_colors = set()
+        self._original_triggers = {} # pfad -> ursprünglicher Trigger, für sauberes Wiederherstellen
+        self._stop_event = threading.Event()
+        self._thread = None
+
+        multicolor = find_multicolor_led()
+        rgb = None if multicolor else find_rgb_led_triplet()
+        mono = None if (multicolor or rgb) else find_mono_led()
+
+        if multicolor:
+            self.mode = "multicolor"
+            self.multicolor = multicolor
+            self.available_colors = {c.lower() for c in multicolor["channels"] if c.lower() in ("red", "green", "blue")}
+            self._disable_trigger(multicolor["path"])
+        elif rgb:
+            self.mode = "rgb"
+            self.rgb_channels = rgb
+            self.available_colors = set(rgb.keys())
+            for path in rgb.values():
+                self._disable_trigger(path)
+        elif mono:
+            self.mode = "mono"
+            self.mono_path = mono
+            self._disable_trigger(mono)
+
+        self.available = self.mode is not None
+        if self.available:
+            atexit.register(self._restore_on_exit)
+
+    def _disable_trigger(self, path):
+        self._original_triggers[path] = self._read_current_trigger(path)
+        self._write(path, "trigger", "none")
+
+    def _read_current_trigger(self, path):
+        try:
+            with open(os.path.join(path, "trigger"), "r") as f:
+                match = re.search(r"\[(.+?)\]", f.read())
+                return match.group(1) if match else None
+        except OSError:
+            return None
+
+    def _write(self, path, filename, value):
+        try:
+            with open(os.path.join(path, filename), "w") as f:
+                f.write(str(value))
+        except OSError:
+            pass
+
+    def _resolve_color(self, requested):
+        if requested in self.available_colors:
+            return requested
+        if requested == "blue" and {"red", "green"} <= self.available_colors:
+            return "yellow" # kein eigener Blau-Kanal -> Rot+Grün als Ersatzfarbe
+        return next(iter(self.available_colors), None)
+
+    def _apply_off(self):
+        if self.mode == "mono":
+            self._write(self.mono_path, "brightness", 0)
+        elif self.mode == "rgb":
+            for path in self.rgb_channels.values():
+                self._write(path, "brightness", 0)
+        elif self.mode == "multicolor":
+            self._write(self.multicolor["path"], "brightness", 0)
+
+    def _apply_color(self, color):
+        if self.mode == "mono":
+            self._write(self.mono_path, "brightness", 1)
+        elif self.mode == "rgb":
+            active = COLOR_CHANNEL_MAP.get(color, ())
+            for name, path in self.rgb_channels.items():
+                self._write(path, "brightness", 1 if name in active else 0)
+        elif self.mode == "multicolor":
+            active = COLOR_CHANNEL_MAP.get(color, ())
+            max_brightness = self.multicolor["max_brightness"]
+            intensities = [str(max_brightness if ch.lower() in active else 0) for ch in self.multicolor["channels"]]
+            self._write(self.multicolor["path"], "multi_intensity", " ".join(intensities))
+            self._write(self.multicolor["path"], "brightness", max_brightness)
+
+    def _blink_loop(self, color, pattern):
+        while not self._stop_event.is_set():
+            for on_time, off_time in pattern:
+                if self._stop_event.is_set():
+                    break
+                self._apply_color(color) # bei mono wird "color" ignoriert (einfach an)
+                if self._stop_event.wait(on_time):
+                    break
+                self._apply_off()
+                if self._stop_event.wait(off_time):
+                    break
+
+    def set_state_pattern(self, spec):
+        if not self.available or spec is None:
+            return
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=1)
+        self._stop_event = threading.Event()
+
+        if self.mode == "mono":
+            pattern = spec["mono"]
+            if pattern is None:
+                self._apply_off()
+            else:
+                self._thread = threading.Thread(target=self._blink_loop, args=(None, pattern), daemon=True)
+                self._thread.start()
+        else:
+            color = self._resolve_color(spec["color"])
+            pattern = spec["pattern"]
+            if pattern is None:
+                self._apply_color(color) # dauerhaft an, z.B. idle = grün
+            else:
+                self._thread = threading.Thread(target=self._blink_loop, args=(color, pattern), daemon=True)
+                self._thread.start()
+
+    def _restore_on_exit(self):
+        self._stop_event.set()
+        for path, trigger in self._original_triggers.items():
+            if trigger:
+                self._write(path, "trigger", trigger)
+
+led_controller = LedController()
+_last_led_state = None
+
+# --- Pi 500+ Tastatur-RGB-LEDs für Blink-Codes ---
+# Die Power-Taste ist laut Raspberry-Pi-Doku von keinem Software-Effekt beeinflussbar, aber einzelne
+# Tasten können per "rpi-keyboard-config" (Vial-QMK-Firmware) individuell eingefärbt werden.
+# Vorausgesetzt: `sudo apt install rpi-keyboard-fw-update rpi-keyboard-config` + Firmware-Update.
+# Genutzt werden die vier Pfeiltasten unten rechts (Hoch/Links/Runter/Rechts) - unauffällig beim Tippen.
+KEYBOARD_STATUS_KEYS = [(4, 14), (5, 13), (5, 14), (5, 15)]
+KEYBOARD_LED_COLOR_VALUES = {"red": "rgb(255,0,0)", "green": "rgb(0,255,0)", "blue": "rgb(0,0,255)"}
+# Etwas trägere Timings als LED_PATTERNS, da jeder Farbwechsel mehrere CLI-Subprozesse braucht.
+KEYBOARD_LED_PATTERNS = {
+    "idle":       {"color": "green", "pattern": None},
+    "metadata":   {"color": "blue",  "pattern": [(0.3, 0.3)]},
+    "ripping":    {"color": "blue",  "pattern": [(0.6, 0.6)]},
+    "converting": {"color": "blue",  "pattern": [(0.3, 0.3)]},
+    "success":    {"color": "green", "pattern": [(1.0, 1.0)]},
+    "error":      {"color": "red",   "pattern": [(0.15, 0.15), (0.15, 0.15), (0.15, 0.9)]},
+}
+
+class KeyboardLedController:
+    def __init__(self):
+        self.binary = shutil.which("rpi-keyboard-config")
+        self.available = self.binary is not None
+        self._stop_event = threading.Event()
+        self._thread = None
+
+    def _run(self, *args):
+        try:
+            subprocess.run([self.binary, *args], capture_output=True, timeout=2)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+    def _configure_color(self, color):
+        # Die Tastatur-Firmware erlaubt offenbar nur eine HID-Verbindung gleichzeitig - parallele
+        # "led set"-Aufrufe für alle 4 Tasten haben sich gegenseitig blockiert (blieben dunkel).
+        # Deshalb: Farben einmalig sequenziell setzen und als "direct"-Effekt speichern, danach
+        # reicht für jeden Blink-Wechsel ein einziger, schneller Aufruf (leds load/clear).
+        colour_value = KEYBOARD_LED_COLOR_VALUES.get(color, "rgb(0,0,0)")
+        for row, col in KEYBOARD_STATUS_KEYS:
+            self._run("led", "set", f"{row},{col}", "--colour", colour_value)
+        self._run("leds", "save")
+
+    def _blink_loop(self, pattern):
+        while not self._stop_event.is_set():
+            for on_time, off_time in pattern:
+                if self._stop_event.is_set():
+                    break
+                self._run("leds", "load")
+                if self._stop_event.wait(on_time):
+                    break
+                self._run("leds", "clear")
+                if self._stop_event.wait(off_time):
+                    break
+
+    def set_state_pattern(self, state):
+        if not self.available:
+            return
+        spec = KEYBOARD_LED_PATTERNS.get(state)
+        if spec is None:
+            return
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=1)
+        self._stop_event = threading.Event()
+        self._configure_color(spec["color"])
+        if spec["pattern"] is None:
+            self._run("leds", "load") # dauerhaft an, z.B. idle = grün
+        else:
+            self._thread = threading.Thread(target=self._blink_loop, args=(spec["pattern"],), daemon=True)
+            self._thread.start()
+
+keyboard_led_controller = KeyboardLedController()
+
 def load_settings():
     if os.path.exists(SETTINGS_FILE):
         try:
@@ -109,7 +380,7 @@ class SettingsModel(BaseModel):
     enable_speed_chart: bool = False
 
 def update_status(state, message, artist=None, album=None, progress=0, message_key=None, message_params=None):
-    global current_status
+    global current_status, _last_led_state
     current_status["state"] = state
     current_status["message"] = message
     current_status["message_key"] = message_key
@@ -120,6 +391,10 @@ def update_status(state, message, artist=None, album=None, progress=0, message_k
     if state == "idle":
         current_status["speed_mbps"] = 0
         current_status["speed_history"] = []
+    if state != _last_led_state:
+        _last_led_state = state
+        led_controller.set_state_pattern(LED_PATTERNS.get(state))
+        keyboard_led_controller.set_state_pattern(state)
     print(f"[{state.upper()}] {message}")
 
 def clean_filename(name):
@@ -187,6 +462,28 @@ def get_usb_stick_info(output_path):
     except OSError:
         pass
     return info
+
+def list_all_leds():
+    """Rohe Auflistung aller /sys/class/leds-Geräte samt Fähigkeiten - zur manuellen Identifikation der richtigen LED."""
+    base_dir = "/sys/class/leds"
+    entries = []
+    try:
+        names = sorted(os.listdir(base_dir))
+    except OSError:
+        return entries
+    for name in names:
+        path = os.path.join(base_dir, name)
+        entry = {"name": name}
+        for filename in ("brightness", "max_brightness", "trigger", "multi_intensity", "multi_index"):
+            filepath = os.path.join(path, filename)
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, "r") as f:
+                        entry[filename] = f.read().strip()
+                except OSError:
+                    entry[filename] = None
+        entries.append(entry)
+    return entries
 
 def get_boot_id():
     try:
@@ -422,6 +719,14 @@ def get_status():
 @app.get("/api/system-info")
 def get_system_info():
     settings = load_settings()
+    if led_controller.mode == "mono":
+        led_path = led_controller.mono_path
+    elif led_controller.mode == "multicolor":
+        led_path = led_controller.multicolor["path"]
+    elif led_controller.mode == "rgb":
+        led_path = ", ".join(sorted(led_controller.rgb_channels.values()))
+    else:
+        led_path = None
     return {
         "version": APP_VERSION,
         "developer": APP_DEVELOPER,
@@ -431,6 +736,25 @@ def get_system_info():
         "ram": get_ram_info(),
         "optical_drive": get_optical_drive_info("/dev/sr0"),
         "usb_stick": get_usb_stick_info(settings["output_path"]),
+        "led": {
+            "available": led_controller.available,
+            "mode": led_controller.mode,
+            "path": led_path,
+            "colors": sorted(led_controller.available_colors) or None,
+        },
+        "keyboard_led": {
+            "available": keyboard_led_controller.available,
+            "binary": keyboard_led_controller.binary,
+            "keys": KEYBOARD_STATUS_KEYS,
+        },
+    }
+
+@app.get("/api/led-debug")
+def led_debug():
+    return {
+        "detected_mode": led_controller.mode,
+        "detected_colors": sorted(led_controller.available_colors) or None,
+        "all_leds": list_all_leds(),
     }
 
 @app.get("/api/settings")

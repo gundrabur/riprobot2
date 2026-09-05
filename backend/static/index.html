@@ -67,6 +67,7 @@
                     <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.ram">RAM</span>: <span id="info-ram">-</span></p>
                     <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.opticalDrive">Optisches Laufwerk</span>: <span id="info-optical">-</span></p>
                     <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.usbStick">USB-Stick</span>: <span id="info-usb">-</span></p>
+                    <p class="text-gray-300 text-sm"><span class="text-gray-500" data-i18n="info.led">Status-LED</span>: <span id="info-led">-</span></p>
                 </div>
             </div>
         </div>
@@ -226,6 +227,9 @@
                 "info.ram": "RAM",
                 "info.opticalDrive": "Optisches Laufwerk",
                 "info.usbStick": "USB-Stick",
+                "info.led": "Status-LED",
+                "info.ledAvailable": "Verfügbar, Modus {mode} ({path})",
+                "info.ledUnavailable": "Nicht verfügbar (kein Sichtfenster oder kein Zugriff)",
                 "info.ramFormat": "{available} MB frei von {total} MB",
                 "info.usbFormat": "{path} ({free} GB frei von {total} GB)",
                 "info.usbNotMounted": "{path} (nicht eingehängt)",
@@ -313,6 +317,9 @@
                 "info.ram": "RAM",
                 "info.opticalDrive": "Optical drive",
                 "info.usbStick": "USB drive",
+                "info.led": "Status LED",
+                "info.ledAvailable": "Available, mode {mode} ({path})",
+                "info.ledUnavailable": "Not available (no window in case, or no access)",
                 "info.ramFormat": "{available} MB free of {total} MB",
                 "info.usbFormat": "{path} ({free} GB free of {total} GB)",
                 "info.usbNotMounted": "{path} (not mounted)",
@@ -753,6 +760,7 @@
             document.getElementById('info-ram').textContent = '-';
             document.getElementById('info-optical').textContent = '-';
             document.getElementById('info-usb').textContent = '-';
+            document.getElementById('info-led').textContent = '-';
 
             try {
                 const res = await fetch('/api/system-info');
@@ -777,6 +785,11 @@
                 document.getElementById('info-usb').textContent = usb.mounted
                     ? translate('info.usbFormat', { path: usb.path, free: usb.free_gb, total: usb.total_gb })
                     : translate('info.usbNotMounted', { path: usb.path || '-' });
+
+                const led = data.led || {};
+                document.getElementById('info-led').textContent = led.available
+                    ? translate('info.ledAvailable', { mode: led.mode, path: led.path })
+                    : translate('info.ledUnavailable');
             } catch (e) {
                 console.error(translate('error.loadInfo'));
             }
