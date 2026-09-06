@@ -266,7 +266,9 @@
                 "drivePicker.title": "USB-Laufwerk auswählen",
                 "drivePicker.noneFound": "Kein USB-Laufwerk unter /media gefunden.",
                 "drivePicker.freeOf": "{free} GB frei von {total} GB",
+                "drivePicker.notMounted": "Nicht eingehängt - anklicken zum Einhängen",
                 "error.loadDrives": "Laufwerke konnten nicht geladen werden.",
+                "error.mountDrive": "Laufwerk konnte nicht eingehängt werden.",
                 "settings.accuracy": "Auslesegenauigkeit",
                 "settings.networkTimeout": "MusicBrainz-Timeout (Sek.)",
                 "settings.ripTimeout": "Rip-Abbruch nach (Sek.)",
@@ -361,7 +363,9 @@
                 "drivePicker.title": "Select USB drive",
                 "drivePicker.noneFound": "No USB drive found under /media.",
                 "drivePicker.freeOf": "{free} GB free of {total} GB",
+                "drivePicker.notMounted": "Not mounted - click to mount",
                 "error.loadDrives": "Drives could not be loaded.",
+                "error.mountDrive": "Drive could not be mounted.",
                 "settings.accuracy": "Read accuracy",
                 "settings.networkTimeout": "MusicBrainz timeout (sec.)",
                 "settings.ripTimeout": "Abort rip after (sec.)",
@@ -834,7 +838,7 @@
                     alert(translate('drivePicker.noneFound'));
                     return;
                 }
-                if (drives.length === 1) {
+                if (drives.length === 1 && drives[0].mounted) {
                     document.getElementById('set-path').value = drives[0].path;
                     return;
                 }
@@ -845,18 +849,17 @@
                     const button = document.createElement('button');
                     button.type = 'button';
                     button.className = 'w-full text-left bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg p-3 transition';
-                    const spaceInfo = (drive.free_gb != null && drive.total_gb != null)
-                        ? translate('drivePicker.freeOf', { free: drive.free_gb, total: drive.total_gb })
-                        : '';
+                    const statusInfo = drive.mounted
+                        ? ((drive.free_gb != null && drive.total_gb != null)
+                            ? translate('drivePicker.freeOf', { free: drive.free_gb, total: drive.total_gb })
+                            : '')
+                        : translate('drivePicker.notMounted');
                     button.innerHTML = `
                         <p class="text-white font-medium break-words">${drive.label}</p>
-                        <p class="text-xs text-gray-500 break-words">${drive.path}</p>
-                        <p class="text-xs text-gray-500">${spaceInfo}</p>
+                        <p class="text-xs text-gray-500 break-words">${drive.mounted ? drive.path : drive.device}</p>
+                        <p class="text-xs ${drive.mounted ? 'text-gray-500' : 'text-yellow-500'}">${statusInfo}</p>
                     `;
-                    button.addEventListener('click', () => {
-                        document.getElementById('set-path').value = drive.path;
-                        closeDrivePicker();
-                    });
+                    button.addEventListener('click', () => selectDrive(drive));
                     list.appendChild(button);
                 });
 
@@ -864,6 +867,30 @@
                 document.getElementById('drive-picker-modal').classList.remove('hidden');
             } catch (e) {
                 alert(translate('error.loadDrives'));
+            }
+        }
+
+        async function selectDrive(drive) {
+            if (drive.mounted) {
+                document.getElementById('set-path').value = drive.path;
+                closeDrivePicker();
+                return;
+            }
+            try {
+                const res = await fetch('/api/usb-drives/mount', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device: drive.device })
+                });
+                if (!res.ok) {
+                    const error = await res.json().catch(() => ({}));
+                    throw new Error(error.detail || translate('error.mountDrive'));
+                }
+                const data = await res.json();
+                document.getElementById('set-path').value = data.path;
+                closeDrivePicker();
+            } catch (e) {
+                alert(e.message || translate('error.mountDrive'));
             }
         }
 

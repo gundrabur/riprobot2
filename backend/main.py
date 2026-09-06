@@ -466,35 +466,84 @@ def get_usb_stick_info(output_path):
 def _describe_mount(path):
     try:
         usage = shutil.disk_usage(path)
-        return {"path": path, "label": os.path.basename(path), "total_gb": round(usage.total / (1024 ** 3), 1), "free_gb": round(usage.free / (1024 ** 3), 1)}
+        return {"total_gb": round(usage.total / (1024 ** 3), 1), "free_gb": round(usage.free / (1024 ** 3), 1)}
     except OSError:
-        return {"path": path, "label": os.path.basename(path), "total_gb": None, "free_gb": None}
+        return {"total_gb": None, "free_gb": None}
 
-def list_usb_drives(base_dir="/media"):
-    """Findet gemountete Laufwerke unter /media, sowohl direkt (z.B. /media/usb) als auch im
-    Auto-Mount-Layout mancher Desktop-Umgebungen (z.B. /media/<user>/<label>)."""
-    drives = []
-    if not os.path.isdir(base_dir):
-        return drives
+def _unescape_mount_path(path):
+    # /proc/mounts kodiert Sonderzeichen in Mountpunkten oktal, z.B. Leerzeichen als \040
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), path)
+
+def _read_mounted_devices():
+    """{Geraetepfad: Mountpunkt} fuer alles, was aktuell gemountet ist."""
+    mounted = {}
     try:
-        entries = sorted(os.listdir(base_dir))
+        with open("/proc/mounts", "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and parts[0].startswith("/dev/"):
+                    mounted[parts[0]] = _unescape_mount_path(parts[1])
+    except OSError:
+        pass
+    return mounted
+
+def _read_partition_label(name):
+    try:
+        for label in os.listdir("/dev/disk/by-label"):
+            target = os.path.realpath(os.path.join("/dev/disk/by-label", label))
+            if os.path.basename(target) == name:
+                return label
+    except OSError:
+        pass
+    return None
+
+def list_usb_drives():
+    """Findet alle Partitionen auf wechselbaren (USB-)Datentraegern - gemountet oder nicht - über
+    /sys/class/block. So tauchen auch Sticks auf, die vom Betriebssystem (noch) nicht automatisch
+    gemountet wurden (z.B. headless ohne Automount-Dienst), und koennen ueber die UI gemountet werden."""
+    drives = []
+    base = "/sys/class/block"
+    try:
+        names = sorted(os.listdir(base))
     except OSError:
         return drives
-    for name in entries:
-        path = os.path.join(base_dir, name)
-        if not os.path.isdir(path):
+    mounted_devices = _read_mounted_devices()
+    for name in names:
+        if name.startswith(("loop", "zram", "sr", "ram")):
             continue
-        if os.path.ismount(path):
-            drives.append(_describe_mount(path))
-            continue
+        if not os.path.exists(os.path.join(base, name, "partition")):
+            continue # nur Partitionen (z.B. sda1), nicht die Disk selbst (sda)
+        parent = re.sub(r"\d+$", "", name)
         try:
-            for sub_name in sorted(os.listdir(path)):
-                sub_path = os.path.join(path, sub_name)
-                if os.path.ismount(sub_path):
-                    drives.append(_describe_mount(sub_path))
+            with open(f"/sys/block/{parent}/removable", "r") as f:
+                removable = f.read().strip() == "1"
         except OSError:
-            pass
-    return drives
+            removable = False
+        if not removable:
+            continue
+
+        device_path = f"/dev/{name}"
+        mount_point = mounted_devices.get(device_path)
+        label = _read_partition_label(name) or name
+        entry = {"device": device_path, "name": name, "label": label, "mounted": mount_point is not None, "path": mount_point}
+        if mount_point:
+            entry.update(_describe_mount(mount_point))
+        else:
+            entry["total_gb"] = None
+            entry["free_gb"] = None
+        drives.append(entry)
+    return sorted(drives, key=lambda d: d["device"])
+
+def mount_usb_drive(device_path):
+    """Haengt eine (noch) nicht gemountete Partition unter /media/<Label|Geraetename> ein."""
+    if not device_path.startswith("/dev/"):
+        raise ValueError("Ungültiger Gerätepfad")
+    name = os.path.basename(device_path)
+    label = _read_partition_label(name) or name
+    mount_point = os.path.join("/media", label)
+    os.makedirs(mount_point, exist_ok=True)
+    subprocess.run(["mount", device_path, mount_point], check=True, capture_output=True)
+    return mount_point
 
 def list_all_leds():
     """Rohe Auflistung aller /sys/class/leds-Geräte samt Fähigkeiten - zur manuellen Identifikation der richtigen LED."""
@@ -797,6 +846,18 @@ def get_settings():
 @app.get("/api/usb-drives")
 def get_usb_drives():
     return list_usb_drives()
+
+@app.post("/api/usb-drives/mount")
+def post_mount_usb_drive(payload: dict):
+    device = payload.get("device", "")
+    try:
+        mount_point = mount_usb_drive(device)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except subprocess.CalledProcessError as error:
+        detail = error.stderr.decode(errors="ignore").strip() if error.stderr else "Mount fehlgeschlagen"
+        raise HTTPException(status_code=500, detail=detail) from error
+    return {"path": mount_point}
 
 @app.post("/api/settings")
 def update_settings(new_settings: SettingsModel):
