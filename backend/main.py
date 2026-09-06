@@ -463,6 +463,39 @@ def get_usb_stick_info(output_path):
         pass
     return info
 
+def _describe_mount(path):
+    try:
+        usage = shutil.disk_usage(path)
+        return {"path": path, "label": os.path.basename(path), "total_gb": round(usage.total / (1024 ** 3), 1), "free_gb": round(usage.free / (1024 ** 3), 1)}
+    except OSError:
+        return {"path": path, "label": os.path.basename(path), "total_gb": None, "free_gb": None}
+
+def list_usb_drives(base_dir="/media"):
+    """Findet gemountete Laufwerke unter /media, sowohl direkt (z.B. /media/usb) als auch im
+    Auto-Mount-Layout mancher Desktop-Umgebungen (z.B. /media/<user>/<label>)."""
+    drives = []
+    if not os.path.isdir(base_dir):
+        return drives
+    try:
+        entries = sorted(os.listdir(base_dir))
+    except OSError:
+        return drives
+    for name in entries:
+        path = os.path.join(base_dir, name)
+        if not os.path.isdir(path):
+            continue
+        if os.path.ismount(path):
+            drives.append(_describe_mount(path))
+            continue
+        try:
+            for sub_name in sorted(os.listdir(path)):
+                sub_path = os.path.join(path, sub_name)
+                if os.path.ismount(sub_path):
+                    drives.append(_describe_mount(sub_path))
+        except OSError:
+            pass
+    return drives
+
 def list_all_leds():
     """Rohe Auflistung aller /sys/class/leds-Geräte samt Fähigkeiten - zur manuellen Identifikation der richtigen LED."""
     base_dir = "/sys/class/leds"
@@ -760,6 +793,10 @@ def led_debug():
 @app.get("/api/settings")
 def get_settings():
     return load_settings()
+
+@app.get("/api/usb-drives")
+def get_usb_drives():
+    return list_usb_drives()
 
 @app.post("/api/settings")
 def update_settings(new_settings: SettingsModel):

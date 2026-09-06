@@ -72,6 +72,18 @@
             </div>
         </div>
 
+        <!-- DRIVE PICKER MODAL -->
+        <div id="drive-picker-modal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onclick="if (event.target === this) closeDrivePicker()">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl shadow-lg max-w-md w-full p-6 space-y-4">
+                <div class="flex justify-between items-start">
+                    <h2 class="text-xl font-bold text-white" data-i18n="drivePicker.title">USB-Laufwerk auswählen</h2>
+                    <button onclick="closeDrivePicker()" class="text-gray-400 hover:text-white transition text-xl leading-none">&times;</button>
+                </div>
+                <div id="drive-picker-list" class="space-y-2"></div>
+                <p id="drive-picker-empty" class="hidden text-sm text-gray-500" data-i18n="drivePicker.noneFound">Kein USB-Laufwerk unter /media gefunden.</p>
+            </div>
+        </div>
+
         <!-- DASHBOARD TAB -->
         <div id="tab-dashboard" class="block space-y-6">
             
@@ -163,7 +175,10 @@
                         <!-- Zielordner -->
                         <div>
                             <label class="block text-sm font-medium text-gray-400 mb-2" data-i18n="settings.outputPath">Zielverzeichnis (USB-Stick)</label>
-                            <input type="text" id="set-path" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 transition" placeholder="/media/usb">
+                            <div class="flex gap-2">
+                                <input type="text" id="set-path" class="w-full bg-gray-950 border border-gray-700 rounded-lg p-3 text-white focus:outline-none focus:border-blue-500 transition" placeholder="/media/usb">
+                                <button type="button" onclick="openDrivePicker()" class="shrink-0 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-4 py-3 rounded-lg text-sm font-medium transition" data-i18n="settings.selectDrive">Auswählen</button>
+                            </div>
                         </div>
 
                         <!-- Paranoia Mode -->
@@ -247,6 +262,11 @@
                 "settings.title": "System-Einstellungen",
                 "settings.outputFormat": "Ausgabeformat",
                 "settings.outputPath": "Zielverzeichnis (USB-Stick)",
+                "settings.selectDrive": "Auswählen",
+                "drivePicker.title": "USB-Laufwerk auswählen",
+                "drivePicker.noneFound": "Kein USB-Laufwerk unter /media gefunden.",
+                "drivePicker.freeOf": "{free} GB frei von {total} GB",
+                "error.loadDrives": "Laufwerke konnten nicht geladen werden.",
                 "settings.accuracy": "Auslesegenauigkeit",
                 "settings.networkTimeout": "MusicBrainz-Timeout (Sek.)",
                 "settings.ripTimeout": "Rip-Abbruch nach (Sek.)",
@@ -337,6 +357,11 @@
                 "settings.title": "System settings",
                 "settings.outputFormat": "Output format",
                 "settings.outputPath": "Destination folder (USB drive)",
+                "settings.selectDrive": "Select",
+                "drivePicker.title": "Select USB drive",
+                "drivePicker.noneFound": "No USB drive found under /media.",
+                "drivePicker.freeOf": "{free} GB free of {total} GB",
+                "error.loadDrives": "Drives could not be loaded.",
                 "settings.accuracy": "Read accuracy",
                 "settings.networkTimeout": "MusicBrainz timeout (sec.)",
                 "settings.ripTimeout": "Abort rip after (sec.)",
@@ -797,6 +822,53 @@
 
         function closeInfoModal() {
             document.getElementById('info-modal').classList.add('hidden');
+        }
+
+        // --- USB-Laufwerk-Auswahl ---
+        async function openDrivePicker() {
+            try {
+                const res = await fetch('/api/usb-drives');
+                const drives = await res.json();
+
+                if (drives.length === 0) {
+                    alert(translate('drivePicker.noneFound'));
+                    return;
+                }
+                if (drives.length === 1) {
+                    document.getElementById('set-path').value = drives[0].path;
+                    return;
+                }
+
+                const list = document.getElementById('drive-picker-list');
+                list.innerHTML = '';
+                drives.forEach(drive => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'w-full text-left bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg p-3 transition';
+                    const spaceInfo = (drive.free_gb != null && drive.total_gb != null)
+                        ? translate('drivePicker.freeOf', { free: drive.free_gb, total: drive.total_gb })
+                        : '';
+                    button.innerHTML = `
+                        <p class="text-white font-medium break-words">${drive.label}</p>
+                        <p class="text-xs text-gray-500 break-words">${drive.path}</p>
+                        <p class="text-xs text-gray-500">${spaceInfo}</p>
+                    `;
+                    button.addEventListener('click', () => {
+                        document.getElementById('set-path').value = drive.path;
+                        closeDrivePicker();
+                    });
+                    list.appendChild(button);
+                });
+
+                document.getElementById('drive-picker-empty').classList.add('hidden');
+                document.getElementById('drive-picker-modal').classList.remove('hidden');
+            } catch (e) {
+                alert(translate('error.loadDrives'));
+            }
+        }
+
+        function closeDrivePicker() {
+            document.getElementById('drive-picker-modal').classList.add('hidden');
         }
 
         // Start: Status jede Sekunde abrufen
