@@ -26,13 +26,16 @@ The current implementation already covers the core workflow for unattended rippi
 - No-cache static delivery so frontend updates become visible after a normal refresh
 
 ### Output drive selection
-- The settings page can discover removable drives, including devices that are present but not mounted yet
-- A picker can surface multiple removable drives and the selected device can be mounted directly from the UI
+- Removable drives are detected continuously and mounted automatically under /media/<label-or-device>; if several are plugged in, all of them are mounted
+- If the configured output path is not a writable mount, the first detected drive is selected as the target automatically
+- The settings page lists all detected drives and lets you switch the target to any of them
 - The default output path is /media/usb, but another mounted or mountable target can be chosen
 
 ### Optional status LEDs
 - Onboard LEDs under /sys/class/leds are detected automatically and used for status blinking when available
-- Raspberry Pi 500+ keyboard RGB keys can be controlled via rpi-keyboard-config when the host supports it
+- Raspberry Pi 500+ cursor keys show persistent colors via rpi-keyboard-config: green = ready, violet = metadata query, yellow = ripping, blue = converting, white = copying to USB, red = rip error
+- In the ready state, the cursor-up key is red when no USB storage is available and the cursor-down key is red when no optical drive is available
+- The four cursor keys do not blink; their colors alone represent the current state
 - Both features are best-effort and fail safely if the hardware or tooling is unavailable
 
 ### Platform
@@ -170,7 +173,7 @@ Most settings are handled in the web UI and stored in backend/settings.json.
 The read-speed graph is based on the growth of the temporary rip files. Ripping into /dev/shm first avoids USB write speed affecting the measured optical drive read rate. If not enough RAM is available, the application falls back to writing directly to the destination and the chart can be influenced by the target device.
 
 ### LED support
-The backend auto-detects onboard LEDs in /sys/class/leds and can also drive Pi 500+ keyboard keys via rpi-keyboard-config when installed. These features are optional and do not block the ripping workflow if unavailable.
+The backend auto-detects onboard LEDs in /sys/class/leds and can also drive Pi 500+ cursor keys via rpi-keyboard-config when installed. The cursor keys use steady colors rather than blinking: green (ready), violet (metadata query), yellow (ripping), blue (conversion), white (USB copy), and red (error). In the ready state, cursor up indicates missing USB storage and cursor down indicates a missing optical drive. These features are optional and do not block the ripping workflow if unavailable.
 
 ## Troubleshooting
 - Check /dev/sr0 and the output path if the app cannot see the drive or USB storage

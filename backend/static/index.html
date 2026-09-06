@@ -94,7 +94,7 @@
                         <h2 class="text-lg font-semibold text-gray-300" data-i18n="dashboard.currentStatus">Aktueller Status</h2>
                         <div class="mt-2 flex items-start gap-3 min-w-0">
                             <span id="status-indicator" class="relative flex h-4 w-4 shrink-0 mt-2">
-                              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-gray-500 opacity-75"></span>
+                              <span class="absolute inline-flex h-full w-full rounded-full opacity-0"></span>
                               <span class="relative inline-flex rounded-full h-4 w-4 bg-gray-500"></span>
                             </span>
                             <div class="min-w-0">
@@ -560,24 +560,16 @@
                 const indicatorInner = document.querySelector('#status-indicator span:nth-child(2)');
                 const indicatorPing = document.querySelector('#status-indicator span:nth-child(1)');
                 
-                let colorClass = 'bg-gray-500'; // idle
-                if (data.state === 'metadata') colorClass = 'bg-yellow-500';
-                if (data.state === 'ripping') colorClass = 'bg-blue-500';
-                if (data.state === 'converting') colorClass = 'bg-purple-500';
-                if (data.state === 'success') colorClass = 'bg-green-500';
+                let colorClass = 'bg-green-500';
+                if (data.state === 'metadata') colorClass = 'bg-purple-500';
+                if (data.state === 'ripping') colorClass = 'bg-yellow-500';
+                if (data.state === 'converting') {
+                    colorClass = data.message_key === 'status.syncingUsb' ? 'bg-white' : 'bg-blue-500';
+                }
                 if (data.state === 'error') colorClass = 'bg-red-500';
 
-                // Alle alten Farben entfernen und neue setzen
                 indicatorInner.className = `relative inline-flex rounded-full h-4 w-4 ${colorClass}`;
-                indicatorPing.className = `animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${colorClass}`;
-                
-                // Bei idle/success das Blinken (ping) ausschalten
-                if (data.state === 'idle' || data.state === 'success') {
-                    indicatorPing.style.display = 'none';
-                } else {
-                    indicatorPing.style.display = 'block';
-                }
-                
+                indicatorPing.style.display = 'none';
                 bar.className = `h-4 rounded-full ${colorClass.replace('bg-', 'bg-')}`;
 
             } catch (e) {

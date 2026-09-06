@@ -18,10 +18,13 @@ import socket
 import uuid
 import platform
 import atexit
+import fcntl
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    threading.Thread(target=watch_for_usb_drives, daemon=True).start()
     threading.Thread(target=wait_for_startup_hardware, daemon=True).start()
+    threading.Thread(target=watch_for_disc_insertion, daemon=True).start()
     yield
 
 app = FastAPI(title="RipRobot2 API", lifespan=lifespan)
@@ -267,6 +270,7 @@ class LedController:
 
 led_controller = LedController()
 _last_led_state = None
+_last_keyboard_led_state = None
 
 # --- Pi 500+ Tastatur-RGB-LEDs für Blink-Codes ---
 # Die Power-Taste ist laut Raspberry-Pi-Doku von keinem Software-Effekt beeinflussbar, aber einzelne
@@ -274,15 +278,13 @@ _last_led_state = None
 # Vorausgesetzt: `sudo apt install rpi-keyboard-fw-update rpi-keyboard-config` + Firmware-Update.
 # Genutzt werden die vier Pfeiltasten unten rechts (Hoch/Links/Runter/Rechts) - unauffällig beim Tippen.
 KEYBOARD_STATUS_KEYS = [(4, 14), (5, 13), (5, 14), (5, 15)]
-KEYBOARD_LED_COLOR_VALUES = {"red": "rgb(255,0,0)", "green": "rgb(0,255,0)", "blue": "rgb(0,0,255)"}
-# Etwas trägere Timings als LED_PATTERNS, da jeder Farbwechsel mehrere CLI-Subprozesse braucht.
-KEYBOARD_LED_PATTERNS = {
-    "idle":       {"color": "green", "pattern": None},
-    "metadata":   {"color": "blue",  "pattern": [(0.3, 0.3)]},
-    "ripping":    {"color": "blue",  "pattern": [(0.6, 0.6)]},
-    "converting": {"color": "blue",  "pattern": [(0.3, 0.3)]},
-    "success":    {"color": "green", "pattern": [(1.0, 1.0)]},
-    "error":      {"color": "red",   "pattern": [(0.15, 0.15), (0.15, 0.15), (0.15, 0.9)]},
+KEYBOARD_LED_COLOR_VALUES = {
+    "red": "rgb(255,0,0)",
+    "yellow": "rgb(255,180,0)",
+    "green": "rgb(0,255,0)",
+    "blue": "rgb(0,0,255)",
+    "violet": "rgb(180,0,255)",
+    "white": "rgb(255,255,255)",
 }
 
 class KeyboardLedController:
@@ -291,6 +293,7 @@ class KeyboardLedController:
         self.available = self.binary is not None
         self._stop_event = threading.Event()
         self._thread = None
+        self._last_colors = None
 
     def _run(self, *args):
         try:
@@ -298,44 +301,44 @@ class KeyboardLedController:
         except (OSError, subprocess.TimeoutExpired):
             pass
 
-    def _configure_color(self, color):
-        # Die Tastatur-Firmware erlaubt offenbar nur eine HID-Verbindung gleichzeitig - parallele
-        # "led set"-Aufrufe für alle 4 Tasten haben sich gegenseitig blockiert (blieben dunkel).
-        # Deshalb: Farben einmalig sequenziell setzen und als "direct"-Effekt speichern, danach
-        # reicht für jeden Blink-Wechsel ein einziger, schneller Aufruf (leds load/clear).
-        colour_value = KEYBOARD_LED_COLOR_VALUES.get(color, "rgb(0,0,0)")
-        for row, col in KEYBOARD_STATUS_KEYS:
+    def _configure_colors(self, colors):
+        self._run("leds", "clear")
+        for (row, col), color in zip(KEYBOARD_STATUS_KEYS, colors):
+            colour_value = KEYBOARD_LED_COLOR_VALUES.get(color, "rgb(0,0,0)")
             self._run("led", "set", f"{row},{col}", "--colour", colour_value)
         self._run("leds", "save")
 
-    def _blink_loop(self, pattern):
-        while not self._stop_event.is_set():
-            for on_time, off_time in pattern:
-                if self._stop_event.is_set():
-                    break
-                self._run("leds", "load")
-                if self._stop_event.wait(on_time):
-                    break
-                self._run("leds", "clear")
-                if self._stop_event.wait(off_time):
-                    break
-
-    def set_state_pattern(self, state):
+    def set_state_pattern(self, state, message_key=None):
         if not self.available:
-            return
-        spec = KEYBOARD_LED_PATTERNS.get(state)
-        if spec is None:
             return
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=1)
         self._stop_event = threading.Event()
-        self._configure_color(spec["color"])
-        if spec["pattern"] is None:
-            self._run("leds", "load") # dauerhaft an, z.B. idle = grün
-        else:
-            self._thread = threading.Thread(target=self._blink_loop, args=(spec["pattern"],), daemon=True)
-            self._thread.start()
+
+        colors = ["green"] * len(KEYBOARD_STATUS_KEYS)
+        if state == "metadata":
+            colors = ["violet"] * len(KEYBOARD_STATUS_KEYS)
+        elif state == "ripping":
+            colors = ["yellow"] * len(KEYBOARD_STATUS_KEYS)
+        elif state == "converting":
+            colors = ["white"] * len(KEYBOARD_STATUS_KEYS) if message_key == "status.syncingUsb" else ["blue"] * len(KEYBOARD_STATUS_KEYS)
+        elif state == "error":
+            colors = ["red"] * len(KEYBOARD_STATUS_KEYS)
+
+        if state == "idle":
+            if not output_storage_ready(load_settings()["output_path"]):
+                colors[0] = "red" # Cursor hoch: kein USB-Speicher
+            if not os.path.exists("/dev/sr0"):
+                colors[2] = "red" # Cursor runter: kein optisches Laufwerk
+
+        if colors == self._last_colors:
+            return
+        self._configure_colors(colors)
+        self._last_colors = colors
+
+    def refresh_hardware_state(self):
+        self.set_state_pattern(current_status["state"], current_status.get("message_key"))
 
 keyboard_led_controller = KeyboardLedController()
 
@@ -380,7 +383,7 @@ class SettingsModel(BaseModel):
     enable_speed_chart: bool = False
 
 def update_status(state, message, artist=None, album=None, progress=0, message_key=None, message_params=None):
-    global current_status, _last_led_state
+    global current_status, _last_led_state, _last_keyboard_led_state
     current_status["state"] = state
     current_status["message"] = message
     current_status["message_key"] = message_key
@@ -394,7 +397,10 @@ def update_status(state, message, artist=None, album=None, progress=0, message_k
     if state != _last_led_state:
         _last_led_state = state
         led_controller.set_state_pattern(LED_PATTERNS.get(state))
-        keyboard_led_controller.set_state_pattern(state)
+    keyboard_state = (state, message_key)
+    if keyboard_state != _last_keyboard_led_state:
+        _last_keyboard_led_state = keyboard_state
+        keyboard_led_controller.set_state_pattern(state, message_key)
     print(f"[{state.upper()}] {message}")
 
 def clean_filename(name):
@@ -545,6 +551,47 @@ def mount_usb_drive(device_path):
     subprocess.run(["mount", device_path, mount_point], check=True, capture_output=True)
     return mount_point
 
+_usb_mount_failures = set() # Geräte, deren Mount fehlschlug - erst nach Abziehen/Neuanstecken erneut versuchen
+
+def sync_usb_drives():
+    """Haengt alle erkannten, noch nicht gemounteten Wechseldatentraeger ein. Ist das konfigurierte Ziel
+    nicht beschreibbar gemountet, wird der erste erkannte Stick automatisch als Ziel gesetzt."""
+    drives = list_usb_drives()
+    present_devices = {drive["device"] for drive in drives}
+    _usb_mount_failures.intersection_update(present_devices)
+
+    for drive in drives:
+        if drive["mounted"] or drive["device"] in _usb_mount_failures:
+            continue
+        try:
+            drive["path"] = mount_usb_drive(drive["device"])
+            drive["mounted"] = True
+            print(f"[USB] {drive['device']} eingehängt unter {drive['path']}")
+        except (OSError, subprocess.CalledProcessError) as error:
+            _usb_mount_failures.add(drive["device"])
+            detail = error.stderr.decode(errors="ignore").strip() if getattr(error, "stderr", None) else str(error)
+            print(f"[USB] {drive['device']} konnte nicht eingehängt werden: {detail}")
+
+    mounted_paths = [drive["path"] for drive in drives if drive["mounted"] and drive["path"]]
+    if not mounted_paths:
+        keyboard_led_controller.refresh_hardware_state()
+        return
+    settings = load_settings()
+    if not output_storage_ready(settings["output_path"]):
+        settings["output_path"] = mounted_paths[0]
+        save_settings(settings)
+        print(f"[USB] Zielverzeichnis automatisch auf {mounted_paths[0]} gesetzt")
+    keyboard_led_controller.refresh_hardware_state()
+
+def watch_for_usb_drives(poll_interval=3):
+    print("[USB] Beobachte Wechseldatenträger...")
+    while True:
+        try:
+            sync_usb_drives()
+        except Exception as error:
+            print(f"[USB] Fehler bei der Laufwerksprüfung: {error}")
+        time.sleep(poll_interval)
+
 def list_all_leds():
     """Rohe Auflistung aller /sys/class/leds-Geräte samt Fähigkeiten - zur manuellen Identifikation der richtigen LED."""
     base_dir = "/sys/class/leds"
@@ -585,30 +632,59 @@ def output_storage_ready(output_path):
     except OSError:
         return False
 
+# CDROM-ioctl (aus linux/cdrom.h), um zu erkennen, ob ein Medium eingelegt ist, ohne es zu lesen/mounten.
+CDROM_DRIVE_STATUS = 0x5326
+CDS_DISC_OK = 4
+
+def disc_is_present(device_path):
+    try:
+        fd = os.open(device_path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        return fcntl.ioctl(fd, CDROM_DRIVE_STATUS, 0) == CDS_DISC_OK
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
 def wait_for_startup_hardware(device_path="/dev/sr0", retry_interval=2):
     boot_id = get_boot_id()
+    already_ejected = False
     try:
         with open(STARTUP_EJECT_MARKER, "r") as file:
-            if file.read().strip() == boot_id:
-                return
+            already_ejected = file.read().strip() == boot_id
     except OSError:
         pass
 
-    print("[STARTUP] Warte auf CD-Laufwerk und beschreibbaren USB-Stick...")
+    if not already_ejected:
+        print("[STARTUP] Warte auf CD-Laufwerk und beschreibbaren USB-Stick...")
+        while True:
+            output_path = load_settings()["output_path"]
+            if os.path.exists(device_path) and output_storage_ready(output_path):
+                with lock:
+                    if current_status["state"] == "idle":
+                        try:
+                            subprocess.run(["eject", device_path], check=True, capture_output=True)
+                            with open(STARTUP_EJECT_MARKER, "w") as file:
+                                file.write(boot_id)
+                            update_status("idle", "System bereit. Bitte CD einlegen.", "", "", 0, "status.systemReady")
+                            break
+                        except (OSError, subprocess.CalledProcessError) as error:
+                            print(f"[STARTUP] Laufwerk noch nicht bereit: {error}")
+            time.sleep(retry_interval)
+
+def watch_for_disc_insertion(device_path="/dev/sr0", poll_interval=2):
+    print("[WATCH] Beobachte Laufwerk auf eingelegte CDs...")
     while True:
-        output_path = load_settings()["output_path"]
-        if os.path.exists(device_path) and output_storage_ready(output_path):
-            with lock:
-                if current_status["state"] == "idle":
-                    try:
-                        subprocess.run(["eject", device_path], check=True, capture_output=True)
-                        with open(STARTUP_EJECT_MARKER, "w") as file:
-                            file.write(boot_id)
-                        update_status("idle", "System bereit. Bitte CD einlegen.", "", "", 0, "status.systemReady")
-                        return
-                    except (OSError, subprocess.CalledProcessError) as error:
-                        print(f"[STARTUP] Laufwerk noch nicht bereit: {error}")
-        time.sleep(retry_interval)
+        time.sleep(poll_interval)
+        with lock:
+            if current_status["state"] != "idle":
+                continue
+            if not disc_is_present(device_path):
+                continue
+            update_status("metadata", "CD erkannt, Rip-Vorgang wird gestartet...", "", "", 0, "status.queueingRip")
+            threading.Thread(target=start_ripping, args=(device_path,), daemon=True).start()
 
 def start_ripping(device_path: str):
     settings = load_settings()
