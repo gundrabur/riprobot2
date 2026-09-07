@@ -12,16 +12,15 @@ set -euo pipefail
 
 TARGET_USER="rr2"                 # ggf. anpassen
 TARGET_HOME="/home/${TARGET_USER}"
-SERVICE_NAME="riprobot.service"   # ggf. anpassen
 
 if [[ $EUID -ne 0 ]]; then
   echo "Bitte mit sudo ausführen: sudo bash $0" >&2
   exit 1
 fi
 
-echo "==> RipRobot-Dienst aktivieren (idempotent, falls schon aktiv)"
-systemctl enable "${SERVICE_NAME}" \
-  || echo "    Hinweis: ${SERVICE_NAME} nicht gefunden — Namen oben prüfen."
+echo "==> Docker-Dienst aktivieren (idempotent, falls schon aktiv; startet den RipRobot2-Container dank restart:unless-stopped automatisch mit)"
+systemctl enable docker \
+  || echo "    Hinweis: docker.service nicht gefunden — ist install.sh gelaufen?"
 
 echo "==> APT-Cache leeren"
 apt clean
@@ -41,7 +40,13 @@ echo "    jeden Boot unbedenklich, egal ob Keys schon existieren oder fehlen)"
 mkdir -p /etc/systemd/system/ssh.service.d
 cat > /etc/systemd/system/ssh.service.d/override.conf << 'OVERRIDE_EOF'
 [Service]
+# Leere Zuweisung löscht das von der Distro vorgegebene ExecStartPre
+# (u.a. "sshd -t"), das ohne Host-Keys fehlschlägt und ssh.service startet
+# dann erst gar nicht ("Connection refused"). Danach eigene Reihenfolge:
+# erst Keys erzeugen, dann Config testen.
+ExecStartPre=
 ExecStartPre=/usr/bin/ssh-keygen -A
+ExecStartPre=/usr/sbin/sshd -t
 OVERRIDE_EOF
 systemctl daemon-reload
 
