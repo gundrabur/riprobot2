@@ -110,7 +110,7 @@ Open http://<host>:8000 in a browser. The interface contains four sections:
 
 For creating and preparing SD-card images from a Mac, use the scripts in the tools folder:
 
-- [tools/create-sd-image.sh](tools/create-sd-image.sh): interactively creates a raw image from a connected SD card or USB storage device. The image can be written back later with the official Raspberry Pi Imager via "Choose OS" → "Use custom".
+- [tools/create-sd-image.sh](tools/create-sd-image.sh): interactively creates a raw image from a connected SD card or USB storage device. The image can be written back later with the official Raspberry Pi Imager via "Choose OS" → "Use custom".h
 - [tools/wipe-sd-card.sh](tools/wipe-sd-card.sh): interactively fills a connected SD card or USB stick with zero bytes before imaging. This makes later compression of the resulting image much more efficient.
 - [tools/prepare-image.sh](tools/prepare-image.sh): prepares a Raspberry Pi installation before cloning the SD card, while keeping SSH and the hostname setup intact for a smooth first boot.
 
