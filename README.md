@@ -106,6 +106,22 @@ Open http://<host>:8000 in a browser. The interface contains four sections:
 - Einstellungen: output format, output path, paranoia mode, timeouts, and speed-chart toggle
 - Info: version, developer, copyright, and live system/LED diagnostics
 
+### macOS imaging helpers
+
+For creating and preparing SD-card images from a Mac, use the scripts in the tools folder:
+
+- [tools/create-sd-image.sh](tools/create-sd-image.sh): interactively creates a raw image from a connected SD card or USB storage device. The image can be written back later with the official Raspberry Pi Imager via "Choose OS" → "Use custom".
+- [tools/wipe-sd-card.sh](tools/wipe-sd-card.sh): interactively fills a connected SD card or USB stick with zero bytes before imaging. This makes later compression of the resulting image much more efficient.
+- [prepare-image.sh](prepare-image.sh): prepares a Raspberry Pi installation before cloning the SD card, while keeping SSH and the hostname setup intact for a smooth first boot.
+
+Example workflow on macOS:
+
+```bash
+cd riprobot2/tools
+./wipe-sd-card.sh
+./create-sd-image.sh
+```
+
 ### REST API
 
 | Method and path | Description |
@@ -148,7 +164,11 @@ riprobot2/
 │   ├── settings.json
 │   ├── history.json
 │   └── static/index.html
+├── tools/
+│   ├── create-sd-image.sh
+│   └── wipe-sd-card.sh
 ├── install.sh
+├── prepare-image.sh
 ├── docker-compose.yml
 ├── LICENSE
 └── README.md
@@ -201,5 +221,5 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 ---
 
-Last updated: September 6, 2026
+Last updated: September 8, 2026
 Maintainer: Christian Möller
