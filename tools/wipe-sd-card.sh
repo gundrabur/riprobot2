@@ -78,18 +78,57 @@ fi
 echo "==> Laufwerk aushängen (bleibt physisch verbunden)"
 diskutil unmountDisk "$DISK_DEV"
 
-echo "==> Karte wird mit Nullbytes gefüllt (Fortschritt: im Terminal Strg+T drücken)"
+echo "==> Karte wird mit Nullbytes gefüllt ..."
 echo "    Das kann je nach Kartengröße und -geschwindigkeit lange dauern."
 echo "    'No space left on device' am Ende ist normal — die Karte ist dann voll beschrieben."
-set +e
-DD_OUTPUT="$(sudo dd if=/dev/zero of="$DISK_RAW" bs=4m 2>&1)"
-DD_STATUS=$?
-set -e
-echo "$DD_OUTPUT"
-if [[ $DD_STATUS -ne 0 ]] && ! echo "$DD_OUTPUT" | grep -qi "no space left"; then
-  echo "Fehler beim Nullen von $DISK_RAW (siehe Ausgabe oben)." >&2
-  exit 1
+
+DISK_BYTES=$(echo "$DISK_INFO" | tr '[:upper:]' '[:lower:]' | grep -oE '[0-9]+ bytes' | head -1 | awk '{print $1}')
+if [[ -z "$DISK_BYTES" ]]; then
+  echo "Hinweis: Gerätegröße konnte nicht sauber in Bytes ermittelt werden; die Fortschrittsleiste wird übersprungen." >&2
+  DISK_BYTES=""
 fi
+
+if [[ -n "$DISK_BYTES" ]] && ! command -v pv >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    echo "pv wird installiert, damit eine echte Fortschrittsleiste angezeigt werden kann..."
+    brew install pv >/dev/null 2>&1 || true
+  fi
+fi
+
+DD_LOG="$(mktemp)"
+set +e
+if [[ -n "$DISK_BYTES" ]] && command -v pv >/dev/null 2>&1; then
+  echo "Fortschritt:"
+  sudo dd if=/dev/zero of="$DISK_RAW" bs=4m 2>"$DD_LOG" | pv -s "$DISK_BYTES" >/dev/null
+  DD_STATUS=${PIPESTATUS[0]}
+else
+  echo "Fortschritt: Spinner wird angezeigt, bis der Schreibvorgang abgeschlossen ist ..."
+  sudo dd if=/dev/zero of="$DISK_RAW" bs=4m 2>"$DD_LOG" >/dev/null &
+  DD_PID=$!
+  SPINNER='|/-\\'
+  i=0
+  while kill -0 "$DD_PID" 2>/dev/null; do
+    printf '\r[%c] Schreiben ...' "${SPINNER:i++%${#SPINNER}:1}"
+    sleep 1
+  done
+  wait "$DD_PID"
+  DD_STATUS=$?
+  printf '\r%s\n' "                                   "
+fi
+set -e
+
+if [[ $DD_STATUS -ne 0 ]]; then
+  if grep -qi "No space left on device" "$DD_LOG"; then
+    echo "Schreiben abgeschlossen: Der Zielträger ist voll beschrieben."
+  else
+    cat "$DD_LOG" >&2
+    echo "Fehler beim Nullen von $DISK_RAW." >&2
+    rm -f "$DD_LOG"
+    exit 1
+  fi
+fi
+
+rm -f "$DD_LOG"
 
 echo "==> Laufwerk auswerfen"
 diskutil eject "$DISK_DEV" || true
