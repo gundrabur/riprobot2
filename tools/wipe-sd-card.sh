@@ -89,37 +89,49 @@ echo "    'No space left on device' am Ende ist normal — die Karte ist dann vo
 
 DISK_BYTES=$(echo "$DISK_INFO" | tr '[:upper:]' '[:lower:]' | grep -oE '[0-9]+ bytes' | head -1 | awk '{print $1}')
 if [[ -z "$DISK_BYTES" ]]; then
-  echo "Hinweis: Gerätegröße konnte nicht sauber in Bytes ermittelt werden; die Fortschrittsleiste wird übersprungen." >&2
+  echo "Hinweis: Gerätegröße konnte nicht sauber in Bytes ermittelt werden; es wird nur die geschriebene Menge angezeigt." >&2
   DISK_BYTES=""
 fi
 
-if [[ -n "$DISK_BYTES" ]] && ! command -v pv >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    echo "pv wird installiert, damit eine echte Fortschrittsleiste angezeigt werden kann..."
-    brew install pv >/dev/null 2>&1 || true
-  fi
-fi
-
 DD_LOG="$(mktemp)"
+sudo -v
 set +e
-if [[ -n "$DISK_BYTES" ]] && command -v pv >/dev/null 2>&1; then
-  echo "Fortschritt:"
-  sudo dd if=/dev/zero of="$DISK_RAW" bs=4m 2>"$DD_LOG" | pv -s "$DISK_BYTES" >/dev/null
-  DD_STATUS=${PIPESTATUS[0]}
-else
-  echo "Fortschritt: Spinner wird angezeigt, bis der Schreibvorgang abgeschlossen ist ..."
-  sudo dd if=/dev/zero of="$DISK_RAW" bs=4m 2>"$DD_LOG" >/dev/null &
-  DD_PID=$!
-  SPINNER='|/-\\'
-  i=0
-  while kill -0 "$DD_PID" 2>/dev/null; do
-    printf '\r[%c] Schreiben ...' "${SPINNER:i++%${#SPINNER}:1}"
-    sleep 1
-  done
-  wait "$DD_PID"
-  DD_STATUS=$?
-  printf '\r%s\n' "                                   "
-fi
+sudo env LC_ALL=C dd if=/dev/zero of="$DISK_RAW" bs=4m 2>"$DD_LOG" >/dev/null &
+DD_PID=$!
+START_TIME=$(date +%s)
+echo "Fortschritt:"
+while kill -0 "$DD_PID" 2>/dev/null; do
+  kill -INFO "$DD_PID" 2>/dev/null || true
+  sleep 1
+  WRITTEN=$(awk '/bytes transferred/ {bytes=$1} END {print bytes}' "$DD_LOG")
+  [[ "$WRITTEN" =~ ^[0-9]+$ ]] || continue
+  ELAPSED=$(( $(date +%s) - START_TIME ))
+  (( ELAPSED < 1 )) && ELAPSED=1
+  awk -v written="$WRITTEN" -v total="$DISK_BYTES" -v elapsed="$ELAPSED" '
+    function human(bytes, unit) {
+      split("B KiB MiB GiB TiB", units, " ")
+      unit = 1
+      while (bytes >= 1024 && unit < 5) { bytes /= 1024; unit++ }
+      return sprintf(bytes >= 10 || unit == 1 ? "%.0f %s" : "%.1f %s", bytes, units[unit])
+    }
+    BEGIN {
+      rate = written / elapsed
+      if (total > 0) {
+        percent = written * 100 / total
+        remaining = rate > 0 ? (total - written) / rate : 0
+        if (remaining < 0) remaining = 0
+        printf "\r%5.1f%% | %s / %s | %s/s | ETA %02d:%02d:%02d", \
+          percent, human(written), human(total), human(rate), \
+          remaining / 3600, (remaining % 3600) / 60, remaining % 60
+      } else {
+        printf "\r%s geschrieben | %s/s", human(written), human(rate)
+      }
+    }
+  '
+done
+wait "$DD_PID"
+DD_STATUS=$?
+printf '\n'
 set -e
 
 if [[ $DD_STATUS -ne 0 ]]; then
