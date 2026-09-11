@@ -28,6 +28,9 @@ TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || echo root)}"
 log "Paketlisten aktualisieren"
 apt-get update -y
 
+log "Installierte Pakete aktualisieren"
+apt-get upgrade -y
+
 log "Grundlegende Werkzeuge installieren"
 apt-get install -y --no-install-recommends ca-certificates curl gnupg git
 
