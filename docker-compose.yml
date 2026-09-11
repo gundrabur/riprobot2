@@ -11,6 +11,9 @@ services:
       - ./backend:/app
       - /media:/media:rshared
       - /dev:/dev                # NEU: Macht alle USB/CD-Geräte (auch nachträglich) sichtbar
+    dns:
+      - 1.1.1.1                  # Fallback-DNS, falls der Docker-eigene Resolver/Router-DNS ausfällt
+      - 8.8.8.8
     environment:
       - TZ=Europe/Berlin
       - PYTHONUNBUFFERED=1

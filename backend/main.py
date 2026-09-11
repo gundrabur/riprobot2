@@ -47,7 +47,49 @@ APP_DEVELOPER = "Christian Möller"
 APP_COPYRIGHT_YEAR = 2026
 lock = threading.Lock()
 history_lock = threading.Lock()
-musicbrainzngs.set_useragent("RipRobot", "2.0", "AUDIO-RipRobot2@local.host")
+# Kontakt-URL statt Fantasie-Domain, da MusicBrainz Anfragen mit unglaubwürdigem User-Agent droht abzulehnen
+musicbrainzngs.set_useragent("RipRobot", "2.0", "https://github.com/")
+
+MUSICBRAINZ_MAX_ATTEMPTS = 3
+MUSICBRAINZ_RETRY_BASE_DELAY = 2  # Sekunden, wird pro Versuch verdoppelt
+
+
+def describe_musicbrainz_error(error: Exception) -> str:
+    """musicbrainzngs-Exceptions (ResponseError/NetworkError) tragen die eigentliche
+    Fehlermeldung im .cause-Attribut, str(error) allein ist meist leer."""
+    cause = getattr(error, "cause", None)
+    detail = str(cause) if cause else str(error)
+    if "name resolution" in detail or "Name or service not known" in detail:
+        detail += " (DNS-Auflösung im Container fehlgeschlagen, Netzwerk/DNS des Hosts pruefen)"
+    return f"{type(error).__name__}: {detail}"
+
+
+def query_musicbrainz_with_retry(disc_id: str):
+    """Fragt MusicBrainz mit Retries/Backoff ab, um kurzzeitige Netzwerk- oder
+    Rate-Limit-Fehler (Timeouts, 503) nicht sofort als endgültiges Scheitern zu werten."""
+    last_error = None
+    for attempt in range(1, MUSICBRAINZ_MAX_ATTEMPTS + 1):
+        try:
+            return musicbrainzngs.get_releases_by_discid(disc_id, includes=["artists", "recordings"])
+        except musicbrainzngs.ResponseError as e:
+            cause = getattr(e, "cause", None)
+            status = getattr(cause, "code", None)
+            if status == 404:
+                # Disc ist MusicBrainz schlicht nicht bekannt, kein Retry sinnvoll
+                return None
+            last_error = e
+        except (musicbrainzngs.NetworkError, OSError) as e:
+            last_error = e
+
+        if attempt < MUSICBRAINZ_MAX_ATTEMPTS:
+            delay = MUSICBRAINZ_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            print(f"MusicBrainz Versuch {attempt}/{MUSICBRAINZ_MAX_ATTEMPTS} fehlgeschlagen "
+                  f"({describe_musicbrainz_error(last_error)}), erneuter Versuch in {delay}s...")
+            time.sleep(delay)
+
+    if last_error:
+        raise last_error
+    return None
 
 # Standard-Einstellungen
 default_settings = {
@@ -706,9 +748,9 @@ def start_ripping(device_path: str):
         socket.setdefaulttimeout(settings["network_timeout"])
         disc = discid.read(device_path)
         track_sectors = [track.sectors for track in disc.tracks]
-        result = musicbrainzngs.get_releases_by_discid(disc.id, includes=["artists", "recordings"])
-        
-        if "disc" in result and result["disc"].get("release-list"):
+        result = query_musicbrainz_with_retry(disc.id)
+
+        if result and "disc" in result and result["disc"].get("release-list"):
             release = result["disc"]["release-list"][0]
             artist = release.get("artist-credit-phrase", "Unknown Artist")
             album = release.get("title", "Unknown Album")
@@ -720,7 +762,7 @@ def start_ripping(device_path: str):
                         title = track.get("title") or track.get("recording", {}).get("title", "Track")
                         track_titles.append(title)
     except Exception as e:
-        print(f"MusicBrainz Fehler: {e}")
+        print(f"MusicBrainz Fehler: {describe_musicbrainz_error(e)}")
 
     update_status("ripping", "Starte Rip-Vorgang...", artist, album, message_key="status.startingRip")
 

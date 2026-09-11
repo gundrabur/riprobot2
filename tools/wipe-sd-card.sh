@@ -20,28 +20,33 @@
 
 set -euo pipefail
 
-echo "==> Externe Laufwerke werden gesucht ..."
+echo "==> SD-Karten und externe Laufwerke werden gesucht ..."
 echo ""
 
-# Kandidaten sammeln: alle externen, physischen Laufwerke (keine internen/System-Disks)
+# Kandidaten sammeln: externe physische Laufwerke sowie entfernbare SD-Karten
+# im eingebauten Kartenleser (diese meldet macOS als "Internal").
 CANDIDATES=()
 while IFS= read -r line; do
   DISK_ID="$(echo "$line" | awk '{print $1}' | sed 's#^/dev/##')"
   [[ -z "$DISK_ID" ]] && continue
   INFO="$(diskutil info "/dev/${DISK_ID}" 2>/dev/null || true)"
   [[ -z "$INFO" ]] && continue
-  echo "$INFO" | grep -q "Internal:.*Yes" && continue
-  CANDIDATES+=("$DISK_ID")
-done < <(diskutil list external physical | awk '/^\/dev\/disk/ {print $1}')
+  if echo "$INFO" | grep -Eq "Device Location:.*External|Internal:.*No"; then
+    CANDIDATES+=("$DISK_ID")
+  elif echo "$INFO" | grep -q "Protocol:.*Secure Digital" \
+    && echo "$INFO" | grep -q "Removable Media:.*Removable"; then
+    CANDIDATES+=("$DISK_ID")
+  fi
+done < <(diskutil list physical | awk '/^\/dev\/disk/ {print $1}')
 
 if [[ ${#CANDIDATES[@]} -eq 0 ]]; then
-  echo "Keine externen Laufwerke gefunden. Ist die Karte eingesteckt?" >&2
+  echo "Keine SD-Karten oder externen Laufwerke gefunden. Ist die Karte eingesteckt?" >&2
   echo "" >&2
   diskutil list >&2
   exit 1
 fi
 
-echo "Gefundene externe Laufwerke:"
+echo "Gefundene SD-Karten und externe Laufwerke:"
 echo ""
 for i in "${!CANDIDATES[@]}"; do
   DISK_ID="${CANDIDATES[$i]}"
