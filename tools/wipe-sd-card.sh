@@ -96,12 +96,24 @@ fi
 DD_LOG="$(mktemp)"
 sudo -v
 set +e
-sudo env LC_ALL=C dd if=/dev/zero of="$DISK_RAW" bs=4m 2>"$DD_LOG" >/dev/null &
+sudo sh -c '
+  env LC_ALL=C dd if=/dev/zero of="$1" bs=4m &
+  dd_pid=$!
+  while kill -0 "$dd_pid" 2>/dev/null; do
+    sleep 1
+    kill -INFO "$dd_pid" 2>/dev/null || true
+  done &
+  reporter_pid=$!
+  wait "$dd_pid"
+  dd_status=$?
+  kill "$reporter_pid" 2>/dev/null || true
+  wait "$reporter_pid" 2>/dev/null || true
+  exit "$dd_status"
+' sh "$DISK_RAW" 2>"$DD_LOG" >/dev/null &
 DD_PID=$!
 START_TIME=$(date +%s)
 echo "Fortschritt:"
 while kill -0 "$DD_PID" 2>/dev/null; do
-  kill -INFO "$DD_PID" 2>/dev/null || true
   sleep 1
   WRITTEN=$(awk '/bytes transferred/ {bytes=$1} END {print bytes}' "$DD_LOG")
   [[ "$WRITTEN" =~ ^[0-9]+$ ]] || continue
