@@ -11,28 +11,32 @@
 
 set -euo pipefail
 
-echo "==> Externe Laufwerke werden gesucht ..."
+echo "==> Externe Laufwerke und SD-Karten werden gesucht ..."
 echo ""
 
-# Kandidaten sammeln: alle externen, physischen Laufwerke (keine internen/System-Disks)
+# Kandidaten sammeln: externe Laufwerke sowie Wechselmedien in internen Kartenlesern.
+# Interne, nicht wechselbare Laufwerke (insbesondere die System-Disk) bleiben ausgeschlossen.
 CANDIDATES=()
 while IFS= read -r line; do
   DISK_ID="$(echo "$line" | awk '{print $1}' | sed 's#^/dev/##')"
   [[ -z "$DISK_ID" ]] && continue
   INFO="$(diskutil info "/dev/${DISK_ID}" 2>/dev/null || true)"
   [[ -z "$INFO" ]] && continue
-  echo "$INFO" | grep -q "Internal:.*Yes" && continue
+  if echo "$INFO" | grep -qE "^[[:space:]]*(Internal:.*Yes|Device Location:.*Internal)" \
+    && ! echo "$INFO" | grep -qE "Removable Media:.*Removable|Ejectable:.*Yes"; then
+    continue
+  fi
   CANDIDATES+=("$DISK_ID")
-done < <(diskutil list external physical | awk '/^\/dev\/disk/ {print $1}')
+done < <(diskutil list physical | awk '/^\/dev\/disk/ {print $1}')
 
 if [[ ${#CANDIDATES[@]} -eq 0 ]]; then
-  echo "Keine externen Laufwerke gefunden. Ist die SD-Karte eingesteckt?" >&2
+  echo "Keine externen Laufwerke oder SD-Karten gefunden. Ist die SD-Karte eingesteckt?" >&2
   echo "" >&2
   diskutil list >&2
   exit 1
 fi
 
-echo "Gefundene externe Laufwerke:"
+echo "Gefundene externe Laufwerke und SD-Karten:"
 echo ""
 for i in "${!CANDIDATES[@]}"; do
   DISK_ID="${CANDIDATES[$i]}"
@@ -96,9 +100,76 @@ fi
 echo "==> Laufwerk aushängen (bleibt physisch verbunden)"
 diskutil unmountDisk "$DISK_DEV"
 
-echo "==> Image schreiben nach ${OUTPUT} (Fortschritt: im Terminal Strg+T drücken)"
+echo "==> Image schreiben nach ${OUTPUT}"
 echo "    Das kann je nach Kartengröße und -geschwindigkeit lange dauern."
-sudo dd if="$DISK_RAW" of="$OUTPUT" bs=4m
+
+DISK_BYTES=$(echo "$DISK_INFO" | tr '[:upper:]' '[:lower:]' | grep -oE '[0-9]+ bytes' | head -1 | awk '{print $1}' || true)
+if [[ -z "$DISK_BYTES" ]]; then
+  echo "Hinweis: Gerätegröße konnte nicht sauber in Bytes ermittelt werden; es wird nur die gelesene Menge angezeigt." >&2
+  DISK_BYTES=""
+fi
+
+DD_LOG="$(mktemp)"
+sudo -v
+set +e
+sudo sh -c '
+  env LC_ALL=C dd if="$1" of="$2" bs=4m &
+  dd_pid=$!
+  while kill -0 "$dd_pid" 2>/dev/null; do
+    sleep 1
+    kill -INFO "$dd_pid" 2>/dev/null || true
+  done &
+  reporter_pid=$!
+  wait "$dd_pid"
+  dd_status=$?
+  kill "$reporter_pid" 2>/dev/null || true
+  wait "$reporter_pid" 2>/dev/null || true
+  exit "$dd_status"
+' sh "$DISK_RAW" "$OUTPUT" 2>"$DD_LOG" >/dev/null &
+DD_PID=$!
+START_TIME=$(date +%s)
+echo "Fortschritt:"
+while kill -0 "$DD_PID" 2>/dev/null; do
+  sleep 1
+  WRITTEN=$(awk '/bytes transferred/ {bytes=$1} END {print bytes}' "$DD_LOG")
+  [[ "$WRITTEN" =~ ^[0-9]+$ ]] || continue
+  ELAPSED=$(( $(date +%s) - START_TIME ))
+  (( ELAPSED < 1 )) && ELAPSED=1
+  awk -v written="$WRITTEN" -v total="$DISK_BYTES" -v elapsed="$ELAPSED" '
+    function human(bytes, unit) {
+      split("B KiB MiB GiB TiB", units, " ")
+      unit = 1
+      while (bytes >= 1024 && unit < 5) { bytes /= 1024; unit++ }
+      return sprintf(bytes >= 10 || unit == 1 ? "%.0f %s" : "%.1f %s", bytes, units[unit])
+    }
+    BEGIN {
+      rate = written / elapsed
+      if (total > 0) {
+        percent = written * 100 / total
+        remaining = rate > 0 ? (total - written) / rate : 0
+        if (remaining < 0) remaining = 0
+        printf "\r%5.1f%% | %s / %s | %s/s | ETA %02d:%02d:%02d", \
+          percent, human(written), human(total), human(rate), \
+          remaining / 3600, (remaining % 3600) / 60, remaining % 60
+      } else {
+        printf "\r%s gelesen | %s/s", human(written), human(rate)
+      }
+    }
+  '
+done
+wait "$DD_PID"
+DD_STATUS=$?
+printf '\n'
+set -e
+
+if [[ $DD_STATUS -ne 0 ]]; then
+  cat "$DD_LOG" >&2
+  echo "Fehler beim Erstellen des Images von $DISK_RAW." >&2
+  rm -f "$DD_LOG"
+  exit 1
+fi
+
+rm -f "$DD_LOG"
 
 echo "==> Laufwerk auswerfen"
 diskutil eject "$DISK_DEV" || true
