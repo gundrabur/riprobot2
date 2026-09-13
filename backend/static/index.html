@@ -310,6 +310,8 @@
                 "status.success": "Vorgang erfolgreich abgeschlossen!",
                 "status.ripError": "Fehler beim Rippen der CD.",
                 "status.timeout": "Zeitüberschreitung! CD konnte nicht gelesen werden.",
+                "status.storageFull": "Zielspeicher voll! ({free_mb} MB frei, {needed_mb} MB benötigt)",
+                "status.storageFullNoDetails": "Zielspeicher ist voll!",
                 "status.unexpectedError": "Unerwarteter Fehler: {error}",
                 "status.queueingRip": "Rip-Vorgang wird gestartet...",
                 "metadata.unknownArtist": "Unbekannter Interpret",
@@ -407,6 +409,8 @@
                 "status.success": "Process completed successfully!",
                 "status.ripError": "Error while ripping the CD.",
                 "status.timeout": "Timeout! The CD could not be read.",
+                "status.storageFull": "Target storage full! ({free_mb} MB free, {needed_mb} MB required)",
+                "status.storageFullNoDetails": "Target storage is full!",
                 "status.unexpectedError": "Unexpected error: {error}",
                 "status.queueingRip": "Starting rip process...",
                 "metadata.unknownArtist": "Unknown artist",
@@ -645,6 +649,24 @@
                 const isSuccess = entry.status === 'success';
                 const hasChartData = Array.isArray(entry.speed_history) && entry.speed_history.length > 0;
 
+                let statusDetail = '';
+                if (isSuccess) {
+                    statusDetail = translate('history.status.success');
+                } else if (entry.message_key) {
+                    statusDetail = translate(entry.message_key, entry.message_params || {});
+                    if (statusDetail.includes('{')) {
+                        if (entry.message && !entry.message.includes('{')) {
+                            statusDetail = entry.message;
+                        } else if (entry.message_key === 'status.storageFull') {
+                            statusDetail = translate('status.storageFullNoDetails');
+                        }
+                    }
+                } else if (entry.message) {
+                    statusDetail = entry.message;
+                } else {
+                    statusDetail = translate('history.status.error');
+                }
+
                 const card = document.createElement('div');
                 card.className = 'bg-gray-900 border border-gray-800 rounded-xl p-5 shadow-lg';
                 card.innerHTML = `
@@ -654,7 +676,7 @@
                                 <span class="w-2.5 h-2.5 rounded-full ${isSuccess ? 'bg-green-500' : 'bg-red-500'}"></span>
                                 <p class="text-lg font-semibold text-white break-words">${entry.artist || '-'} - ${entry.album || '-'}</p>
                             </div>
-                            <p class="text-sm text-gray-500 mt-1">${entry.timestamp} · ${entry.format || '-'} · ${translate(isSuccess ? 'history.status.success' : 'history.status.error')}</p>
+                            <p class="text-sm ${isSuccess ? 'text-gray-500' : 'text-red-400 font-medium'} mt-1">${entry.timestamp} · ${entry.format || '-'} · ${statusDetail}</p>
                             <p class="text-sm text-gray-400 mt-1">${translate('history.tracks')}: ${entry.track_count ?? '-'} · ${translate('history.duration')}: ${formatDuration(entry.duration_sec)}</p>
                         </div>
                         <div class="flex gap-2 shrink-0">

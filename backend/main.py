@@ -742,27 +742,72 @@ def start_ripping(device_path: str):
     artist, album = "Unknown Artist", "Unknown Album"
     track_titles = []
     track_sectors = []
-    
+    disc = None
+
     try:
-        update_status("metadata", "Suche Metadaten auf MusicBrainz...", message_key="status.searchingMetadata")
-        socket.setdefaulttimeout(settings["network_timeout"])
         disc = discid.read(device_path)
         track_sectors = [track.sectors for track in disc.tracks]
-        result = query_musicbrainz_with_retry(disc.id)
-
-        if result and "disc" in result and result["disc"].get("release-list"):
-            release = result["disc"]["release-list"][0]
-            artist = release.get("artist-credit-phrase", "Unknown Artist")
-            album = release.get("title", "Unknown Album")
-            
-            if "medium-list" in release and len(release["medium-list"]) > 0:
-                medium = release["medium-list"][0]
-                if "track-list" in medium:
-                    for track in medium["track-list"]:
-                        title = track.get("title") or track.get("recording", {}).get("title", "Track")
-                        track_titles.append(title)
     except Exception as e:
-        print(f"MusicBrainz Fehler: {describe_musicbrainz_error(e)}")
+        print(f"DiscID Fehler: {e}")
+
+    if disc:
+        try:
+            update_status("metadata", "Suche Metadaten auf MusicBrainz...", message_key="status.searchingMetadata")
+            socket.setdefaulttimeout(settings["network_timeout"])
+            result = query_musicbrainz_with_retry(disc.id)
+
+            if result and "disc" in result and result["disc"].get("release-list"):
+                release = result["disc"]["release-list"][0]
+                artist = release.get("artist-credit-phrase", "Unknown Artist")
+                album = release.get("title", "Unknown Album")
+                
+                if "medium-list" in release and len(release["medium-list"]) > 0:
+                    medium = release["medium-list"][0]
+                    if "track-list" in medium:
+                        for track in medium["track-list"]:
+                            title = track.get("title") or track.get("recording", {}).get("title", "Track")
+                            track_titles.append(title)
+        except Exception as e:
+            print(f"MusicBrainz Fehler: {describe_musicbrainz_error(e)}")
+
+    total_sectors = sum(track_sectors)
+    required_bytes = (total_sectors * 2352) + (10 * 1024 * 1024) if total_sectors > 0 else 800 * 1024 * 1024
+
+    try:
+        usage = shutil.disk_usage(settings["output_path"])
+        free_bytes = usage.free
+    except OSError:
+        free_bytes = 0
+
+    if free_bytes < required_bytes:
+        free_mb = round(free_bytes / (1024 * 1024))
+        needed_mb = round(required_bytes / (1024 * 1024))
+        msg_text = f"Zielspeicher voll! ({free_mb} MB frei, {needed_mb} MB benötigt)"
+        update_status(
+            "error",
+            msg_text,
+            artist=artist,
+            album=album,
+            message_key="status.storageFull",
+            message_params={"free_mb": free_mb, "needed_mb": needed_mb}
+        )
+        add_history_entry({
+            "id": uuid.uuid4().hex,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "artist": artist,
+            "album": album,
+            "format": settings["format"],
+            "status": "error",
+            "message": msg_text,
+            "message_key": "status.storageFull",
+            "message_params": {"free_mb": free_mb, "needed_mb": needed_mb},
+            "track_count": len(track_sectors) or len(track_titles) or 1,
+            "duration_sec": 0,
+            "speed_history": [],
+        })
+        subprocess.run(["eject", device_path])
+        threading.Timer(10.0, lambda: update_status("idle", "Bereit. Lege eine CD ein.", "", "", 0, "status.ready")).start()
+        return
 
     update_status("ripping", "Starte Rip-Vorgang...", artist, album, message_key="status.startingRip")
 
@@ -780,7 +825,7 @@ def start_ripping(device_path: str):
     session_start = time.time()
     total_files = 0
 
-    def record_history(status, message_key):
+    def record_history(status, message_key, message_params=None, message=None):
         add_history_entry({
             "id": uuid.uuid4().hex,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -788,7 +833,9 @@ def start_ripping(device_path: str):
             "album": album,
             "format": settings["format"],
             "status": status,
+            "message": message or current_status.get("message", ""),
             "message_key": message_key,
+            "message_params": message_params or {},
             "track_count": total_files or total_tracks_expected,
             "duration_sec": round(time.time() - session_start, 1),
             "speed_history": current_status.get("speed_history", []),
@@ -899,9 +946,20 @@ def start_ripping(device_path: str):
     except subprocess.TimeoutExpired:
         update_status("error", "Timeout! CD konnte nicht gelesen werden.", message_key="status.timeout")
         record_history("error", "status.timeout")
+    except OSError as e:
+        if getattr(e, "errno", None) == 28 or "No space left" in str(e):
+            update_status("error", "Zielspeicher voll!", message_key="status.storageFullNoDetails")
+            record_history("error", "status.storageFullNoDetails")
+        else:
+            update_status("error", f"Unerwarteter Fehler: {e}", message_key="status.unexpectedError", message_params={"error": str(e)})
+            record_history("error", "status.unexpectedError", {"error": str(e)})
     except Exception as e:
-        update_status("error", f"Unerwarteter Fehler: {e}", message_key="status.unexpectedError", message_params={"error": str(e)})
-        record_history("error", "status.unexpectedError")
+        if "No space left" in str(e):
+            update_status("error", "Zielspeicher voll!", message_key="status.storageFullNoDetails")
+            record_history("error", "status.storageFullNoDetails")
+        else:
+            update_status("error", f"Unerwarteter Fehler: {e}", message_key="status.unexpectedError", message_params={"error": str(e)})
+            record_history("error", "status.unexpectedError", {"error": str(e)})
         
     finally:
         if ram_dir:
