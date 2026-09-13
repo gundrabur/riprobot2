@@ -10,17 +10,21 @@ The current implementation already covers the core workflow for unattended rippi
 
 ### Ripping and conversion
 - Automated CD ripping with configurable paranoia modes: safe, fast, or disabled
-- MusicBrainz metadata lookup for artist, album, and track titles
+- MusicBrainz metadata lookup for artist, album, and track titles with automatic retries and backoff
 - Selectable output formats: FLAC, MP3, or WAV
+- Automatic target storage pre-check: calculates required space from DiscID track sectors before ripping starts
+- Instant disc ejection and error reporting if target storage is missing or has insufficient space
 - RAM-first ripping into /dev/shm when enough memory is available, followed by move to the final destination
 - Automatic timeout protection for metadata lookup and extraction
-- Automatic disc ejection after success, failure, or timeout
+- Automatic disc ejection after success, failure, timeout, or full target storage
 - Startup readiness eject once per boot when both drive and output storage are available
 
 ### Web dashboard
 - Live status view with artist, album, progress, and current track title
+- Multi-language support (German and English) with live language toggle
+- Clear error reporting in status view and history log when target storage is full or missing (showing free vs required MB)
 - Optional real-time read-speed chart in MB/s while ripping
-- Persistent rip history with per-entry details and delete/clear-all actions
+- Persistent rip history with per-entry details, specific failure causes, speed charts, and delete/clear-all actions
 - Settings panel for format, output path, paranoia mode, timeouts, and speed-chart toggle
 - Info modal with version, developer, hardware details, LED detection, and storage information
 - No-cache static delivery so frontend updates become visible after a normal refresh
@@ -147,11 +151,12 @@ curl -X POST "http://localhost:8000/trigger-rip?device=sr0"
 
 ### Rip workflow
 1. Wait briefly for the disc to stabilize
-2. Verify the chosen output path is available and writable
-3. Request metadata from MusicBrainz when possible
-4. Extract tracks with cdparanoia into a RAM staging directory when available
-5. Convert to FLAC/MP3/WAV, then move the finished files to the final destination
-6. Record the result in history and eject the disc
+2. Read disc structure via DiscID and query MusicBrainz metadata (artist, album, track list)
+3. Check target storage space based on calculated total sectors
+4. If free space is insufficient, display detailed error message with free/needed MB, record error in history under the album metadata, eject disc immediately, and return to idle
+5. Extract tracks with cdparanoia into a RAM staging directory when available
+6. Convert to FLAC/MP3/WAV, then move the finished files to the final destination
+7. Record the result in history and eject the disc
 
 ## Project structure
 
