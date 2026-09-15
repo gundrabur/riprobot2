@@ -3,61 +3,569 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RipRobot2 Download</title>
+<title>RipRobot 2 – Download & Installation</title>
 <style>
+  :root {
+    --bg-dark: #070a12;
+    --card-bg: rgba(15, 23, 42, 0.75);
+    --card-border: rgba(56, 189, 248, 0.2);
+    --accent-cyan: #00f2fe;
+    --accent-teal: #00e5a3;
+    --accent-blue: #38bdf8;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --text-sub: #64748b;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #1a1a1a;
-    color: #f0f0f0;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    min-height: 100vh;
+    line-height: 1.6;
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Fullscreen Backdrop with image */
+  .backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-image: url('riprobot2-aufmacher.jpg');
+    background-size: cover;
+    background-position: center center;
+    background-repeat: no-repeat;
+    z-index: -2;
+    filter: brightness(0.65) contrast(1.1);
+  }
+
+  /* Dark Overlay with cyan/teal radial gradients */
+  .backdrop-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: 
+      radial-gradient(circle at 75% 25%, rgba(0, 242, 254, 0.15) 0%, transparent 50%),
+      radial-gradient(circle at 20% 80%, rgba(0, 229, 163, 0.1) 0%, transparent 50%),
+      linear-gradient(180deg, rgba(7, 10, 18, 0.75) 0%, rgba(7, 10, 18, 0.92) 60%, rgba(7, 10, 18, 0.98) 100%);
+    z-index: -1;
+  }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 4rem;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 1rem;
+    border-radius: 9999px;
+    background: rgba(0, 242, 254, 0.12);
+    border: 1px solid rgba(0, 242, 254, 0.3);
+    color: var(--accent-cyan);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 1.25rem;
+  }
+
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    background-color: var(--accent-teal);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--accent-teal);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 229, 163, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(0, 229, 163, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 229, 163, 0); }
+  }
+
+  h1 {
+    font-size: 3rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #ffffff 30%, var(--accent-cyan) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.75rem;
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    font-size: 1.2rem;
+    color: var(--text-muted);
+    max-width: 680px;
+    margin: 0 auto;
+  }
+
+  .card {
+    background: var(--card-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 2.5rem;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    margin-bottom: 2.5rem;
+  }
+
+  .hero-card {
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .hero-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-cyan), var(--accent-teal), transparent);
+  }
+
+  /* Info Grid */
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1.25rem;
+    margin: 2rem 0;
+  }
+
+  .meta-item {
+    background: rgba(2, 6, 23, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+  }
+
+  .meta-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(0, 242, 254, 0.1);
+    color: var(--accent-cyan);
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 100vh;
-    margin: 0;
+    flex-shrink: 0;
   }
-  .card {
-    background: #262626;
-    border-radius: 12px;
-    padding: 2.5rem 3rem;
-    text-align: center;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-    max-width: 480px;
-  }
-  h1 {
-    margin-top: 0;
-    font-size: 1.8rem;
-  }
-  p {
-    color: #bbb;
-    line-height: 1.5;
-  }
-  .btn {
-    display: inline-block;
-    margin-top: 1.5rem;
-    padding: 0.9rem 2rem;
-    background: #e63946;
-    color: #fff;
-    text-decoration: none;
+
+  .meta-label {
+    font-size: 0.75rem;
+    color: var(--text-sub);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
     font-weight: 600;
-    border-radius: 8px;
-    transition: background 0.2s ease;
   }
-  .btn:hover {
-    background: #c62d3a;
+
+  .meta-value {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-main);
   }
-  .filename {
+
+  /* Buttons */
+  .btn-download {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 1.1rem 2.5rem;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #040d1a;
+    background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-teal) 100%);
+    border: none;
+    border-radius: 12px;
+    text-decoration: none;
+    cursor: pointer;
+    box-shadow: 0 4px 20px rgba(0, 242, 254, 0.35);
+    transition: all 0.25s ease;
+    margin-top: 0.5rem;
+  }
+
+  .btn-download:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(0, 242, 254, 0.5);
+    background: linear-gradient(135deg, #38bdf8 0%, #34d399 100%);
+  }
+
+  .filename-info {
     margin-top: 1rem;
     font-size: 0.85rem;
-    color: #888;
+    color: var(--text-sub);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    line-height: 1.8;
+  }
+
+  .filename-info code {
+    background: rgba(0, 242, 254, 0.1);
+    color: var(--accent-cyan);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+
+  /* Section Titles */
+  .section-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-main);
+  }
+
+  .section-title svg {
+    color: var(--accent-cyan);
+  }
+
+  /* Guide Steps */
+  .steps-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+    list-style: none;
+  }
+
+  .step-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.25rem;
+    background: rgba(2, 6, 23, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+  }
+
+  .step-number {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(0, 242, 254, 0.2), rgba(0, 229, 163, 0.2));
+    border: 1px solid var(--accent-cyan);
+    color: var(--accent-cyan);
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .step-content h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+    color: var(--text-main);
+  }
+
+  .step-content p {
+    font-size: 0.95rem;
+    color: var(--text-muted);
+  }
+
+  .step-content code {
+    background: rgba(0, 242, 254, 0.1);
+    color: var(--accent-cyan);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+
+  /* Tools Grid */
+  .tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .tool-card {
+    background: rgba(2, 6, 23, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+
+  .tool-card:hover {
+    border-color: rgba(56, 189, 248, 0.4);
+    transform: translateY(-2px);
+  }
+
+  .tool-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .tool-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--text-main);
+  }
+
+  .tool-desc {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-bottom: 1.25rem;
+    flex-grow: 1;
+  }
+
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.65rem 1.25rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-main);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.2s ease;
+  }
+
+  .btn-secondary:hover {
+    background: rgba(0, 242, 254, 0.15);
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+  }
+
+  footer {
+    text-align: center;
+    padding-top: 1rem;
+    color: var(--text-sub);
+    font-size: 0.85rem;
+  }
+
+  @media (max-width: 640px) {
+    .container {
+      padding: 2rem 1rem 3rem;
+    }
+    h1 {
+      font-size: 2.1rem;
+    }
+    .card {
+      padding: 1.5rem;
+    }
+    .meta-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .btn-download {
+      width: 100%;
+      padding: 1rem;
+    }
   }
 </style>
 </head>
 <body>
-  <div class="card">
-    <h1>RipRobot2 Image</h1>
-    <p>Lade das aktuelle RipRobot2-Image herunter und schreibe es mit einem Tool wie Raspberry Pi Imager oder Balena Etcher auf eine SD-Karte.</p>
-    <a class="btn" href="https://heft-dvd.de/ISO/riprobot2/riprobot2.img.zip" download>Image herunterladen</a>
-    <div class="filename">riprobot2.img.zip</div>
+
+  <!-- Fullscreen Backdrop Image -->
+  <div class="backdrop"></div>
+  <div class="backdrop-overlay"></div>
+
+  <div class="container">
+    <header>
+      <div class="badge">
+        <span class="pulse-dot"></span>
+        <span>Version 2.0.0</span>
+      </div>
+      <h1>RipRobot 2 Download</h1>
+      <p class="subtitle">Vollautomatische CD-Ripping Appliance für deinen Raspberry Pi mit Web-Dashboard, MusicBrainz-Metadaten &amp; USB-Export.</p>
+    </header>
+
+    <!-- Main Download Card -->
+    <main>
+      <section class="card hero-card">
+        <h2 style="font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem;">Raspberry Pi System-Image</h2>
+        <p style="color: var(--text-muted);">Fertiges Image (basiert auf Raspberry Pi OS) – einfach herunterladen, flashen und losrippen.</p>
+
+        <!-- Metadata Grid -->
+        <div class="meta-grid">
+          <div class="meta-item">
+            <div class="meta-icon">
+              <!-- Tag Icon -->
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"></path></svg>
+            </div>
+            <div>
+              <div class="meta-label">Version</div>
+              <div class="meta-value">2.0.0</div>
+            </div>
+          </div>
+
+          <div class="meta-item">
+            <div class="meta-icon">
+              <!-- Calendar Icon -->
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+            </div>
+            <div>
+              <div class="meta-label">Erstellt am</div>
+              <div class="meta-value">15.09.2026</div>
+            </div>
+          </div>
+
+          <div class="meta-item">
+            <div class="meta-icon">
+              <!-- Hard Drive Icon -->
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 12H2M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"></path><line x1="6" y1="16" x2="6.01" y2="16"></line><line x1="10" y1="16" x2="10.01" y2="16"></line></svg>
+            </div>
+            <div>
+              <div class="meta-label">Dateigröße</div>
+              <div class="meta-value">ca. 2,3 GB</div>
+            </div>
+          </div>
+
+          <div class="meta-item">
+            <div class="meta-icon">
+              <!-- Cpu / Board Icon -->
+              <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="15" x2="23" y2="15"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="15" x2="4" y2="15"></line></svg>
+            </div>
+            <div>
+              <div class="meta-label">Plattform</div>
+              <div class="meta-value">Raspberry Pi</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Download CTA -->
+        <a class="btn-download" href="https://heft-dvd.de/ISO/riprobot2/riprobot2.img.zip" download>
+          <!-- Download Icon -->
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          RipRobot 2 Image herunterladen
+        </a>
+        <div class="filename-info">
+          Dateiname: riprobot2.img.zip<br>
+          MD5 Checksumme: <code>b845f486dfdd98f56a7bd4ef504e24b4</code>
+        </div>
+      </section>
+
+      <!-- Installation Guide Section -->
+      <section class="card">
+        <h2 class="section-title">
+          <!-- Book / Guide Icon -->
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+          Anleitung: So verwendest du das Image
+        </h2>
+
+        <ol class="steps-list">
+          <li class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <h3>Image herunterladen</h3>
+              <p>Lade die Datei <code>riprobot2.img.zip</code> (ca. 2,3 GB) über den Download-Button herunter.</p>
+            </div>
+          </li>
+
+          <li class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <h3>Flashing-Software bereitstellen</h3>
+              <p>Starte ein Tool wie den <strong>Raspberry Pi Imager</strong> oder <strong>balenaEtcher</strong> auf deinem PC oder Mac.</p>
+            </div>
+          </li>
+
+          <li class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <h3>SD-Karte bespielen</h3>
+              <p>Stecke eine MicroSD-Karte (mindestens 16 GB empfohlen) ein. Wähle das heruntergeladene Image <code>riprobot2.img.zip</code> als Quelle und deine SD-Karte als Ziel und starte den Schreibvorgang.</p>
+            </div>
+          </li>
+
+          <li class="step-item">
+            <div class="step-number">4</div>
+            <div class="step-content">
+              <h3>Raspberry Pi starten &amp; nutzen</h3>
+              <p>Setze die geflashte SD-Karte in deinen Raspberry Pi ein, schließe das USB-CD-Laufwerk sowie deinen USB-Speicher-Stick an und schalte den Pi ein. Greife nach dem Booten über deinen Webbrowser auf das Dashboard zu (z.&nbsp;B. unter <code>http://riprobot2.local:8000</code> oder die IP-Adresse des Pi).</p>
+            </div>
+          </li>
+        </ol>
+      </section>
+
+      <!-- Flashing Tools Section -->
+      <section class="card">
+        <h2 class="section-title">
+          <!-- Tool / Wrench Icon -->
+          <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
+          Empfohlene Flashing-Tools
+        </h2>
+        <p style="color: var(--text-muted); margin-bottom: 1.5rem;">Zum Schreiben des Images auf deine MicroSD-Karte kannst du eines der folgenden kostenlosen Tools nutzen:</p>
+
+        <div class="tools-grid">
+          <!-- Raspberry Pi Imager -->
+          <div class="tool-card">
+            <div>
+              <div class="tool-header">
+                <svg width="24" height="24" fill="none" stroke="var(--accent-cyan)" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v8M8 12h8"></path></svg>
+                <div class="tool-title">Raspberry Pi Imager</div>
+              </div>
+              <p class="tool-desc">Das offizielle Dienstprogramm der Raspberry Pi Foundation. Unterstützt Zip-Images direkt („Eigenes Image wählen“) für Windows, macOS und Linux.</p>
+            </div>
+            <a class="btn-secondary" href="https://www.raspberrypi.com/software/" target="_blank" rel="noopener">
+              Raspberry Pi Imager herunterladen
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            </a>
+          </div>
+
+          <!-- balenaEtcher -->
+          <div class="tool-card">
+            <div>
+              <div class="tool-header">
+                <svg width="24" height="24" fill="none" stroke="var(--accent-teal)" stroke-width="2" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                <div class="tool-title">balenaEtcher</div>
+              </div>
+              <p class="tool-desc">Zuverlässige und einfach zu bedienende Anwendung zum Schreiben von OS-Images auf SD-Karten &amp; USB-Sticks inklusive Schreibüberprüfung.</p>
+            </div>
+            <a class="btn-secondary" href="https://etcher.balena.io/" target="_blank" rel="noopener">
+              balenaEtcher herunterladen
+              <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>RipRobot 2 &copy; 2026 – Automated CD Ripping Appliance für Raspberry Pi</p>
+    </footer>
   </div>
+
 </body>
 </html>
